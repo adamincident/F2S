@@ -352,20 +352,15 @@ def get_price_map() -> Dict[str, Decimal]:
     prices: Dict[str, Decimal] = {}
 
     for coin, coin_id in ids.items():
-        usd = data.get(coin_id, {}).get("usd")
-
-        if usd is None:
-            print(f"Warning: Missing price for {coin}")
-            continue
-
-        prices[coin] = Decimal(str(usd))
+usd = data.get(coin_id, {}).get("usd", 0)
+prices[coin] = Decimal(str(usd))
 
     return prices
 def verify_eth(tx_hash: str, prices: Dict[str, Decimal]):
     try:
         # get receipt
         resp = requests.post(
-            "https://rpc.ankr.com/eth",
+            "https://eth.llamarpc.com",
             json={
                 "jsonrpc": "2.0",
                 "method": "eth_getTransactionReceipt",
@@ -386,7 +381,7 @@ def verify_eth(tx_hash: str, prices: Dict[str, Decimal]):
 
         # 🔥 get full tx
         tx_resp = requests.post(
-            "https://rpc.ankr.com/eth",
+            "https://eth.llamarpc.com",
             json={
                 "jsonrpc": "2.0",
                 "method": "eth_getTransactionByHash",
@@ -449,7 +444,7 @@ def check_eth_deposits():
             last_balance_wei = int(row["last_balance_wei"] or "0")
 
             resp = requests.post(
-                "https://rpc.ankr.com/eth",
+                "https://eth.llamarpc.com",
                 json={
                     "jsonrpc": "2.0",
                     "method": "eth_getBalance",
