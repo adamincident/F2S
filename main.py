@@ -328,27 +328,22 @@ def get_price_map() -> Dict[str, Decimal]:
     return prices
 def verify_eth(tx_hash: str, prices: Dict[str, Decimal]):
     try:
-        tx_resp = requests.get(
-            "https://api.etherscan.io/v2/api",
-            params={
-                "chainid": "1",
-                "module": "proxy",
-                "action": "eth_getTransactionByHash",
-                "txhash": tx_hash,
-                "apikey": ETHERSCAN_API_KEY,
+        resp = requests.post(
+            "https://rpc.ankr.com/eth",
+            json={
+                "jsonrpc": "2.0",
+                "method": "eth_getTransactionByHash",
+                "params": [tx_hash],
+                "id": 1,
             },
             timeout=20,
         )
 
-        tx_data = tx_resp.json()
-
-        tx = tx_data.get("result")
+        data = resp.json()
+        tx = data.get("result")
 
         if not tx:
             return False, "Transaction not found yet. Wait ~30 seconds and try again.", Decimal("0"), Decimal("0")
-
-        if not isinstance(tx, dict):
-            return False, f"ETH API error: {tx}", Decimal("0"), Decimal("0")
 
         to_addr = (tx.get("to") or "").lower()
         if to_addr != WALLETS["ETH"].lower():
