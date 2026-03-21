@@ -429,6 +429,71 @@ def verify_eth(tx_hash: str, prices: Dict[str, Decimal]):
     except Exception as e:
         return False, f"ETH error: {str(e)}", Decimal("0"), Decimal("0")
 
+def check_eth_deposits():
+    try:
+        cur = conn.cursor()
+
+        # get all user addresses
+        cur.execute("SELECT user_id, eth_address FROM addresses")
+        rows = cur.fetchall()
+
+        for row in rows:
+            user_id = row["user_id"]
+            address = row["eth_address"].lower()
+
+            # get latest transactions for this address
+            resp = requests.post(
+                "https://rpc.ankr.com/eth",
+                json={
+                    "jsonrpc": "2.0",
+                    "method": "eth_getBalance",
+                    "params": [address, "latest"],
+                    "id": 1,
+                },
+                timeout=20,
+            )
+
+            data = resp.json()
+            balance_hex = data.get("result")
+
+            if not balance_hex:
+                continue
+
+            balance_wei = int(balance_hex, 16)
+
+            # convert to ETH
+            amount_eth = Decimal(balance_wei) / Decimal(10**18)
+
+            # convert to USD (rough estimate)
+            price = get_price_map().get("ETH", Decimal("0"))
+            amount_usd = (amount_eth * price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+            # skip tiny balances
+            if amount_usd < Decimal("1.00"):
+                continue
+
+            # check if already credited (simple protection)
+            cur.execute(
+                "SELECT 1 FROM claims WHERE tx_hash = ?",
+                (f"{address}_{balance_wei}",),
+            )
+            if cur.fetchone():
+                continue
+
+            # credit user
+            new_balance = add_balance(user_id, amount_usd)
+
+            # save "fake tx" to prevent duplicates
+            save_claim("ETH", f"{address}_{balance_wei}", amount_eth, amount_usd, user_id)
+
+            send_message(
+                user_id,
+                f"💰 Deposit received!\n\nAmount: {amount_eth} ETH\nCredited: ${amount_usd}\nNew balance: ${new_balance}",
+            )
+
+    except Exception as e:
+        print(f"ETH check error: {e}")
+
 def verify_btc_like(tx_hash: str, coin: str, prices: Dict[str, Decimal]) -> Tuple[bool, str, Decimal, Decimal]:
     chain_slug = "bitcoin" if coin == "BTC" else "litecoin"
     resp = requests.get(
@@ -937,6 +1002,7 @@ def main() -> None:
 
     while True:
         try:
+            check_eth_deposits()
             data = get_updates(offset)
             for update in data.get("result", []):
                 offset = update["update_id"] + 1
@@ -944,7 +1010,7 @@ def main() -> None:
         except Exception as e:
             print(f"Error: {e}")
             time.sleep(3)
-
+        time.sleep(15)
 
 if __name__ == "__main__":
     main()
