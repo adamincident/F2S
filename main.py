@@ -46,7 +46,6 @@ tron = Tron()
 conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 conn.row_factory = sqlite3.Row
 
-
 def init_db() -> None:
     cur = conn.cursor()
 
@@ -76,13 +75,16 @@ def init_db() -> None:
     """)
 
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS addresses (
-            user_id INTEGER PRIMARY KEY,
-            eth_address TEXT NOT NULL,
-            private_key TEXT NOT NULL,
-            last_balance_wei TEXT NOT NULL DEFAULT '0'
-        )
-    """)
+    CREATE TABLE IF NOT EXISTS addresses (
+        user_id INTEGER PRIMARY KEY,
+        eth_address TEXT,
+        private_key TEXT,
+        last_balance_wei TEXT NOT NULL DEFAULT '0',
+        tron_address TEXT,
+        tron_private_key TEXT,
+        last_trx_balance TEXT NOT NULL DEFAULT '0'
+    )
+""")
 
     # 🔥 TRON columns
     try:
@@ -101,6 +103,7 @@ def init_db() -> None:
         pass
 
     conn.commit()
+
 
 def get_user(user_id: int) -> sqlite3.Row:
     cur = conn.cursor()
@@ -123,21 +126,40 @@ def get_or_create_eth_address(user_id: int):
     cur.execute("SELECT eth_address FROM addresses WHERE user_id = ?", (user_id,))
     row = cur.fetchone()
 
-    if row:
+    if row and row["eth_address"]:
         return row["eth_address"]
 
     acct = Account.create()
-
     address = acct.address
     private_key = acct.key.hex()
 
-    cur.execute(
-        "INSERT INTO addresses (user_id, eth_address, private_key, last_balance_wei) VALUES (?, ?, ?, ?)",
-        (user_id, address, private_key, "0"),
-    )
-    conn.commit()
+    cur.execute("SELECT 1 FROM addresses WHERE user_id = ?", (user_id,))
+    existing = cur.fetchone()
 
+    if existing:
+        cur.execute(
+            """
+            UPDATE addresses
+            SET eth_address = ?, private_key = ?, last_balance_wei = '0'
+            WHERE user_id = ?
+            """,
+            (address, private_key, user_id),
+        )
+    else:
+        cur.execute(
+            """
+            INSERT INTO addresses (
+                user_id, eth_address, private_key, last_balance_wei,
+                tron_address, tron_private_key, last_trx_balance
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (user_id, address, private_key, "0", None, None, "0"),
+        )
+
+    conn.commit()
     return address
+
 
 def get_or_create_tron_address(user_id: int):
     cur = conn.cursor()
@@ -152,16 +174,31 @@ def get_or_create_tron_address(user_id: int):
     tron_address = private_key.public_key.to_base58check_address()
     tron_private_key = private_key.hex()
 
-    cur.execute(
-        """
-        UPDATE addresses
-        SET tron_address = ?, tron_private_key = ?, last_trx_balance = '0'
-        WHERE user_id = ?
-        """,
-        (tron_address, tron_private_key, user_id),
-    )
-    conn.commit()
+    cur.execute("SELECT 1 FROM addresses WHERE user_id = ?", (user_id,))
+    existing = cur.fetchone()
 
+    if existing:
+        cur.execute(
+            """
+            UPDATE addresses
+            SET tron_address = ?, tron_private_key = ?, last_trx_balance = '0'
+            WHERE user_id = ?
+            """,
+            (tron_address, tron_private_key, user_id),
+        )
+    else:
+        cur.execute(
+            """
+            INSERT INTO addresses (
+                user_id, eth_address, private_key, last_balance_wei,
+                tron_address, tron_private_key, last_trx_balance
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (user_id, None, None, "0", tron_address, tron_private_key, "0"),
+        )
+
+    conn.commit()
     return tron_address
 
 def update_user_profile(user_id: int, username: Optional[str], first_name: Optional[str]) -> None:
