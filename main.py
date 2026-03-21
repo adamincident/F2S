@@ -3,6 +3,7 @@ import sqlite3
 import time
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, Optional, Tuple
+from eth_account import Account
 
 import requests
 
@@ -65,8 +66,17 @@ def init_db() -> None:
             claimed_at INTEGER NOT NULL
         )
     """)
-    conn.commit()
 
+    # ✅ NEW TABLE (ADDED)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS addresses (
+            user_id INTEGER PRIMARY KEY,
+            eth_address TEXT NOT NULL,
+            private_key TEXT NOT NULL
+        )
+    """)
+
+    conn.commit()
 
 def get_user(user_id: int) -> sqlite3.Row:
     cur = conn.cursor()
@@ -82,7 +92,29 @@ def get_user(user_id: int) -> sqlite3.Row:
     conn.commit()
     cur.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
     return cur.fetchone()
+    
+# 🔥 ADD THIS RIGHT HERE
+def get_or_create_eth_address(user_id: int):
+    cur = conn.cursor()
 
+    cur.execute("SELECT eth_address FROM addresses WHERE user_id = ?", (user_id,))
+    row = cur.fetchone()
+
+    if row:
+        return row["eth_address"]
+
+    acct = Account.create()
+
+    address = acct.address
+    private_key = acct.key.hex()
+
+    cur.execute(
+        "INSERT INTO addresses (user_id, eth_address, private_key) VALUES (?, ?, ?)",
+        (user_id, address, private_key),
+    )
+    conn.commit()
+
+    return address
 
 def update_user_profile(user_id: int, username: Optional[str], first_name: Optional[str]) -> None:
     cur = conn.cursor()
@@ -600,8 +632,12 @@ def handle_deposit(chat_id: int) -> None:
     send_message(chat_id, "Choose a coin to deposit with:", reply_markup=deposit_keyboard())
 
 
-def handle_show_coin(chat_id: int, coin: str) -> None:
-    address = WALLETS[coin]
+def handle_show_coin(chat_id: int, coin: str, user_id: int) -> None:
+    if coin == "ETH":
+        address = get_or_create_eth_address(user_id)
+    else:
+        address = WALLETS[coin]
+
     text = (
         f"<b>{coin} Deposit</b>\n\n"
         f"<code>{html.escape(address)}</code>\n\n"
@@ -781,7 +817,7 @@ def handle_callback(callback_query: Dict[str, Any]) -> None:
     if data.startswith("deposit_"):
         coin = data.split("_", 1)[1]
         if coin in WALLETS:
-            handle_show_coin(chat_id, coin)
+            handle_show_coin(chat_id, coin, user_id)
         return
 
     user = get_user(user_id)
