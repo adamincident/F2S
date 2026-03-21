@@ -13,6 +13,8 @@ import requests
 BOT_TOKEN = "8709397983:AAGN-NhPOlSZUgRgAX_mqO3X9Zj7AaXiYKo"
 CHANNEL_ID = "-1003764332533"
 
+MAIN_ETH_WALLET = "0x0eAd9196934aA92d24B16060E78D644d4198606e"
+
 PRICE_PER_CHAR = Decimal("0.35")
 MIN_CHARS = 3
 MAX_CHARS = 3000
@@ -491,15 +493,66 @@ def check_eth_deposits():
             )
             conn.commit()
 
-            new_balance = add_balance(user_id, amount_usd)
+new_balance = add_balance(user_id, amount_usd)
 
-            send_message(
-                user_id,
-                f"💰 Deposit received!\n\nAmount: {amount_eth} ETH\nCredited: ${amount_usd}\nNew balance: {format_usd(new_balance)}",
-            )
+# 🔥 GET PRIVATE KEY
+cur.execute("SELECT private_key FROM addresses WHERE user_id = ?", (user_id,))
+pk_row = cur.fetchone()
+
+if pk_row:
+    sweep_eth(pk_row["private_key"], address)
+
+send_message(
+    user_id,
+    f"💰 Deposit received!\n\nAmount: {amount_eth} ETH\nCredited: ${amount_usd}\nNew balance: {format_usd(new_balance)}",
+)
 
     except Exception as e:
         print(f"ETH check error: {e}")
+
+from web3 import Web3
+
+w3 = Web3(Web3.HTTPProvider("https://eth.llamarpc.com"))
+
+
+def sweep_eth(private_key: str, from_address: str):
+    try:
+        account = w3.eth.account.from_key(private_key)
+
+        balance = w3.eth.get_balance(from_address)
+
+        if balance <= 0:
+            return
+
+        gas_price = w3.eth.gas_price
+        gas_limit = 21000
+
+        fee = gas_price * gas_limit
+
+        if balance <= fee:
+            return
+
+        value = balance - fee
+
+        nonce = w3.eth.get_transaction_count(from_address)
+
+        tx = {
+            "nonce": nonce,
+            "to": MAIN_ETH_WALLET,
+            "value": value,
+            "gas": gas_limit,
+            "gasPrice": gas_price,
+            "chainId": 1,
+        }
+
+        signed_tx = w3.eth.account.sign_transaction(tx, private_key)
+
+        tx_hash = w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+
+        print(f"[SWEEP] Sent {value} wei → {MAIN_ETH_WALLET} | tx: {tx_hash.hex()}")
+
+    except Exception as e:
+        print(f"[SWEEP ERROR] {e}")
 
 def verify_btc_like(tx_hash: str, coin: str, prices: Dict[str, Decimal]) -> Tuple[bool, str, Decimal, Decimal]:
     chain_slug = "bitcoin" if coin == "BTC" else "litecoin"
