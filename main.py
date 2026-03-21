@@ -322,8 +322,9 @@ def get_price_map() -> Dict[str, Decimal]:
 def verify_eth(tx_hash: str, prices: Dict[str, Decimal]):
     try:
         tx_resp = requests.get(
-            "https://api.etherscan.io/api",
+            "https://api.etherscan.io/v2/api",
             params={
+                "chainid": "1",
                 "module": "proxy",
                 "action": "eth_getTransactionByHash",
                 "txhash": tx_hash,
@@ -334,15 +335,14 @@ def verify_eth(tx_hash: str, prices: Dict[str, Decimal]):
 
         tx_data = tx_resp.json()
 
-        # 🔥 handle etherscan errors properly
-        if tx_data.get("status") == "0":
-            return False, f"ETH API error: {tx_data.get('result')}", Decimal("0"), Decimal("0")
+        # 🔥 handle API errors
+        if not isinstance(tx_data, dict):
+            return False, "Invalid ETH API response.", Decimal("0"), Decimal("0")
 
         tx = tx_data.get("result")
 
-        # 🔥 critical fix
         if not isinstance(tx, dict):
-            return False, "Invalid transaction data received.", Decimal("0"), Decimal("0")
+            return False, "Transaction not found or not indexed yet.", Decimal("0"), Decimal("0")
 
         to_addr = (tx.get("to") or "").lower()
         if to_addr != WALLETS["ETH"].lower():
