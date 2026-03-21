@@ -228,12 +228,12 @@ def answer_callback(callback_query_id: str, text: str = "") -> None:
 
 def get_updates(offset: Optional[int]) -> Dict[str, Any]:
     payload: Dict[str, Any] = {
-        "timeout": POLL_TIMEOUT,
+        "timeout": 5,
         "allowed_updates": ["message", "callback_query"],
     }
     if offset is not None:
         payload["offset"] = offset
-    resp = requests.get(f"{BASE_URL}/getUpdates", params=payload, timeout=POLL_TIMEOUT + 10)
+    resp = requests.get(f"{BASE_URL}/getUpdates", params=payload, timeout=15)
     data = resp.json()
     if not data.get("ok"):
         raise RuntimeError(f"getUpdates failed: {data}")
@@ -441,6 +441,8 @@ def check_eth_deposits():
         cur.execute("SELECT user_id, eth_address, last_balance_wei FROM addresses")
         rows = cur.fetchall()
 
+        print(f"[ETH CHECK] scanning {len(rows)} addresses")
+
         for row in rows:
             user_id = row["user_id"]
             address = row["eth_address"].lower()
@@ -459,17 +461,33 @@ def check_eth_deposits():
 
             data = resp.json()
             balance_hex = data.get("result")
+
+            print(f"[ETH CHECK] user={user_id} address={address} raw={data}")
+
             if not balance_hex:
                 continue
 
             current_balance_wei = int(balance_hex, 16)
+
+            print(
+                f"[ETH CHECK] user={user_id} "
+                f"last={last_balance_wei} current={current_balance_wei}"
+            )
 
             if current_balance_wei <= last_balance_wei:
                 continue
 
             delta_wei = current_balance_wei - last_balance_wei
             amount_eth = Decimal(delta_wei) / Decimal(10**18)
-            amount_usd = (amount_eth * eth_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            amount_usd = (amount_eth * eth_price).quantize(
+                Decimal("0.01"),
+                rounding=ROUND_HALF_UP
+            )
+
+            print(
+                f"[ETH CHECK] NEW DEPOSIT user={user_id} "
+                f"delta_wei={delta_wei} amount_eth={amount_eth} amount_usd={amount_usd}"
+            )
 
             cur.execute(
                 "UPDATE addresses SET last_balance_wei = ? WHERE user_id = ?",
@@ -1002,14 +1020,17 @@ def main() -> None:
     while True:
         try:
             check_eth_deposits()
+
             data = get_updates(offset)
             for update in data.get("result", []):
                 offset = update["update_id"] + 1
                 handle_update(update)
+
         except Exception as e:
             print(f"Error: {e}")
             time.sleep(3)
-        time.sleep(15)
+
+        time.sleep(5)
 
 if __name__ == "__main__":
     main()
