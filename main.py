@@ -249,16 +249,15 @@ def main_menu_keyboard() -> Dict[str, Any]:
     return {
         "inline_keyboard": [
             [
-                {"text": "Deposit", "callback_data": "menu_deposit"},
-                {"text": "Balance", "callback_data": "menu_balance"},
+                {"text": "💳 Deposit", "callback_data": "menu_deposit"},
+                {"text": "💰 Balance", "callback_data": "menu_balance"},
             ],
             [
-                {"text": "Send Message", "callback_data": "menu_send"},
-                {"text": "Help", "callback_data": "menu_help"},
+                {"text": "✍️ Send Message", "callback_data": "menu_send"},
+                {"text": "❓ Help", "callback_data": "menu_help"},
             ],
         ]
     }
-
 
 def deposit_keyboard() -> Dict[str, Any]:
     rows = []
@@ -304,26 +303,27 @@ def cost_for_message(message: str) -> Decimal:
 
 def welcome_text() -> str:
     return (
-        "Welcome to <b>Fund2Say</b>\n\n"
-        "Send a paid message to the channel using your crypto balance.\n\n"
-        f"• Price: {format_usd(PRICE_PER_CHAR)} per character\n"
-        f"• Minimum: {MIN_CHARS} characters ({format_usd(PRICE_PER_CHAR * MIN_CHARS)})\n"
-        f"• Maximum: {MAX_CHARS} characters\n\n"
-        "Use the buttons below to get started."
+        "🔥 <b>Fund2Say</b>\n\n"
+        "Turn your balance into messages in the channel.\n\n"
+        f"• Rate: {format_usd(PRICE_PER_CHAR)} per character\n"
+        f"• Minimum: {MIN_CHARS} chars ({format_usd(PRICE_PER_CHAR * MIN_CHARS)})\n"
+        f"• Maximum: {MAX_CHARS} chars\n\n"
+        "👇 Use the buttons below to begin."
     )
 
 
 def help_text() -> str:
     return (
-        "<b>How Fund2Say works</b>\n\n"
-        "1. Tap <b>Deposit</b> and choose a coin.\n"
-        "2. Send crypto to the shown address.\n"
-        "3. Claim it with:\n"
-        "<code>/claim COIN TX_HASH</code>\n\n"
-        "Example:\n"
-        "<code>/claim ETH 0x123abc...</code>\n\n"
-        "Then tap <b>Send Message</b>.\n"
-        "You can post publicly or anonymously."
+        "<b>How it works</b>\n\n"
+        "1. Tap <b>Deposit</b>\n"
+        "2. Send crypto\n"
+        "3. Balance updates automatically (ETH)\n"
+        "4. Tap <b>Send Message</b>\n"
+        "5. Confirm and post\n\n"
+        "<b>Notes</b>\n"
+        "• ETH = auto detected\n"
+        "• Others = /claim\n"
+        "• Min 3 characters"
     )
 
 
@@ -765,8 +765,12 @@ def handle_show_coin(chat_id: int, coin: str, user_id: int) -> None:
 
 def handle_balance(chat_id: int, user_id: int) -> None:
     bal = get_balance(user_id)
-    send_message(chat_id, f"💰 Your balance: {format_usd(bal)}", reply_markup=main_menu_keyboard())
-
+    send_message(
+        chat_id,
+        f"💰 <b>Your Balance</b>\n\n{format_usd(bal)}",
+        reply_markup=main_menu_keyboard(),
+        parse_mode="HTML",
+    )
 
 def handle_send_begin(chat_id: int, user_id: int) -> None:
     bal = get_balance(user_id)
