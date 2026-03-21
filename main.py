@@ -325,38 +325,37 @@ def verify_eth(tx_hash: str, prices: Dict[str, Decimal]):
             "https://api.etherscan.io/v2/api",
             params={
                 "chainid": "1",
-                "module": "proxy",
-                "action": "eth_getTransactionByHash",
-                "txhash": tx_hash,
+                "module": "account",
+                "action": "txlist",
+                "address": WALLETS["ETH"],
+                "startblock": 0,
+                "endblock": 99999999,
+                "sort": "desc",
                 "apikey": ETHERSCAN_API_KEY,
             },
             timeout=20,
         )
 
-        tx_data = tx_resp.json()
+        data = tx_resp.json()
 
-        # 🔥 handle API errors
-        if not isinstance(tx_data, dict):
-            return False, "Invalid ETH API response.", Decimal("0"), Decimal("0")
+        if data.get("status") != "1":
+            return False, "ETH API error or no transactions found.", Decimal("0"), Decimal("0")
 
-        tx = tx_data.get("result")
+        txs = data.get("result", [])
 
-        if not isinstance(tx, dict):
-            return False, "Transaction not found or not indexed yet.", Decimal("0"), Decimal("0")
+        # 🔥 find matching TX
+        for tx in txs:
+            if tx.get("hash") == tx_hash.lower():
+                value = int(tx.get("value", "0"))
+                if value <= 0:
+                    return False, "No ETH value found.", Decimal("0"), Decimal("0")
 
-        to_addr = (tx.get("to") or "").lower()
-        if to_addr != WALLETS["ETH"].lower():
-            return False, "Transaction not sent to your ETH wallet.", Decimal("0"), Decimal("0")
+                amount_coin = Decimal(value) / Decimal(10**18)
+                amount_usd = (amount_coin * prices["ETH"]).quantize(Decimal("0.01"))
 
-        value_wei = int(tx.get("value", "0x0"), 16)
+                return True, "ok", amount_coin, amount_usd
 
-        if value_wei <= 0:
-            return False, "No ETH value found.", Decimal("0"), Decimal("0")
-
-        amount_coin = Decimal(value_wei) / Decimal(10**18)
-        amount_usd = (amount_coin * prices["ETH"]).quantize(Decimal("0.01"))
-
-        return True, "ok", amount_coin, amount_usd
+        return False, "Transaction not found in wallet history yet.", Decimal("0"), Decimal("0")
 
     except Exception as e:
         return False, f"ETH error: {str(e)}", Decimal("0"), Decimal("0")
