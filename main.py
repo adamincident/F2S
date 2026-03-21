@@ -66,15 +66,19 @@ def init_db() -> None:
             claimed_at INTEGER NOT NULL
         )
     """)
-
-    # ✅ NEW TABLE (ADDED)
     cur.execute("""
         CREATE TABLE IF NOT EXISTS addresses (
             user_id INTEGER PRIMARY KEY,
             eth_address TEXT NOT NULL,
-            private_key TEXT NOT NULL
+            private_key TEXT NOT NULL,
+            last_balance_wei TEXT NOT NULL DEFAULT '0'
         )
     """)
+
+    try:
+        cur.execute("ALTER TABLE addresses ADD COLUMN last_balance_wei TEXT NOT NULL DEFAULT '0'")
+    except sqlite3.OperationalError:
+        pass
 
     conn.commit()
 
@@ -93,7 +97,6 @@ def get_user(user_id: int) -> sqlite3.Row:
     cur.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
     return cur.fetchone()
     
-# 🔥 ADD THIS RIGHT HERE
 def get_or_create_eth_address(user_id: int):
     cur = conn.cursor()
 
@@ -109,8 +112,8 @@ def get_or_create_eth_address(user_id: int):
     private_key = acct.key.hex()
 
     cur.execute(
-        "INSERT INTO addresses (user_id, eth_address, private_key) VALUES (?, ?, ?)",
-        (user_id, address, private_key),
+        "INSERT INTO addresses (user_id, eth_address, private_key, last_balance_wei) VALUES (?, ?, ?, ?)",
+        (user_id, address, private_key, "0"),
     )
     conn.commit()
 
@@ -432,16 +435,17 @@ def verify_eth(tx_hash: str, prices: Dict[str, Decimal]):
 def check_eth_deposits():
     try:
         cur = conn.cursor()
+        prices = get_price_map()
+        eth_price = prices.get("ETH", Decimal("0"))
 
-        # get all user addresses
-        cur.execute("SELECT user_id, eth_address FROM addresses")
+        cur.execute("SELECT user_id, eth_address, last_balance_wei FROM addresses")
         rows = cur.fetchall()
 
         for row in rows:
             user_id = row["user_id"]
             address = row["eth_address"].lower()
+            last_balance_wei = int(row["last_balance_wei"] or "0")
 
-            # get latest transactions for this address
             resp = requests.post(
                 "https://rpc.ankr.com/eth",
                 json={
@@ -455,40 +459,29 @@ def check_eth_deposits():
 
             data = resp.json()
             balance_hex = data.get("result")
-
             if not balance_hex:
                 continue
 
-            balance_wei = int(balance_hex, 16)
+            current_balance_wei = int(balance_hex, 16)
 
-            # convert to ETH
-            amount_eth = Decimal(balance_wei) / Decimal(10**18)
-
-            # convert to USD (rough estimate)
-            price = get_price_map().get("ETH", Decimal("0"))
-            amount_usd = (amount_eth * price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
-            # skip tiny balances
-            if amount_usd < Decimal("0.01"):
+            if current_balance_wei <= last_balance_wei:
                 continue
 
-            # check if already credited (simple protection)
+            delta_wei = current_balance_wei - last_balance_wei
+            amount_eth = Decimal(delta_wei) / Decimal(10**18)
+            amount_usd = (amount_eth * eth_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
             cur.execute(
-                "SELECT 1 FROM claims WHERE tx_hash = ?",
-                (f"{address}_{balance_wei}",),
+                "UPDATE addresses SET last_balance_wei = ? WHERE user_id = ?",
+                (str(current_balance_wei), user_id),
             )
-            if cur.fetchone():
-                continue
+            conn.commit()
 
-            # credit user
             new_balance = add_balance(user_id, amount_usd)
-
-            # save "fake tx" to prevent duplicates
-            save_claim("ETH", f"{address}_{balance_wei}", amount_eth, amount_usd, user_id)
 
             send_message(
                 user_id,
-                f"💰 Deposit received!\n\nAmount: {amount_eth} ETH\nCredited: ${amount_usd}\nNew balance: ${new_balance}",
+                f"💰 Deposit received!\n\nAmount: {amount_eth} ETH\nCredited: ${amount_usd}\nNew balance: {format_usd(new_balance)}",
             )
 
     except Exception as e:
@@ -700,15 +693,21 @@ def handle_deposit(chat_id: int) -> None:
 def handle_show_coin(chat_id: int, coin: str, user_id: int) -> None:
     if coin == "ETH":
         address = get_or_create_eth_address(user_id)
+        text = (
+            f"<b>{coin} Deposit</b>\n\n"
+            f"<code>{html.escape(address)}</code>\n\n"
+            f"Send ETH directly to this address.\n"
+            f"Your balance will update automatically."
+        )
     else:
         address = WALLETS[coin]
+        text = (
+            f"<b>{coin} Deposit</b>\n\n"
+            f"<code>{html.escape(address)}</code>\n\n"
+            f"After sending, claim with:\n"
+            f"<code>/claim {coin} TX_HASH</code>"
+        )
 
-    text = (
-        f"<b>{coin} Deposit</b>\n\n"
-        f"<code>{html.escape(address)}</code>\n\n"
-        f"After sending, claim with:\n"
-        f"<code>/claim {coin} TX_HASH</code>"
-    )
     send_message(chat_id, text, reply_markup=deposit_keyboard(), parse_mode="HTML")
 
 
