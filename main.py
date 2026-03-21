@@ -439,8 +439,6 @@ def check_eth_deposits():
         cur.execute("SELECT user_id, eth_address, last_balance_wei FROM addresses")
         rows = cur.fetchall()
 
-        print(f"[ETH CHECK] scanning {len(rows)} addresses")
-
         for row in rows:
             user_id = row["user_id"]
             address = row["eth_address"].lower()
@@ -460,52 +458,40 @@ def check_eth_deposits():
             data = resp.json()
             balance_hex = data.get("result")
 
-            print(f"[ETH CHECK] user={user_id} address={address} raw={data}")
-
             if not balance_hex:
                 continue
 
             current_balance_wei = int(balance_hex, 16)
-
-            print(
-                f"[ETH CHECK] user={user_id} "
-                f"last={last_balance_wei} current={current_balance_wei}"
-            )
 
             if current_balance_wei <= last_balance_wei:
                 continue
 
             delta_wei = current_balance_wei - last_balance_wei
             amount_eth = Decimal(delta_wei) / Decimal(10**18)
-            amount_usd = (amount_eth * eth_price).quantize(
-                Decimal("0.01"),
-                rounding=ROUND_HALF_UP
-            )
+            amount_usd = (amount_eth * eth_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
-            print(
-                f"[ETH CHECK] NEW DEPOSIT user={user_id} "
-                f"delta_wei={delta_wei} amount_eth={amount_eth} amount_usd={amount_usd}"
-            )
-
+            # 🔥 update stored balance
             cur.execute(
                 "UPDATE addresses SET last_balance_wei = ? WHERE user_id = ?",
                 (str(current_balance_wei), user_id),
             )
             conn.commit()
 
-new_balance = add_balance(user_id, amount_usd)
+            # 🔥 credit user
+            new_balance = add_balance(user_id, amount_usd)
 
-# 🔥 GET PRIVATE KEY
-cur.execute("SELECT private_key FROM addresses WHERE user_id = ?", (user_id,))
-pk_row = cur.fetchone()
+            # 🔥 sweep
+            cur.execute("SELECT private_key FROM addresses WHERE user_id = ?", (user_id,))
+            pk_row = cur.fetchone()
 
-if pk_row:
-    sweep_eth(pk_row["private_key"], address)
+            if pk_row:
+                sweep_eth(pk_row["private_key"], address)
 
-send_message(
-    user_id,
-    f"💰 Deposit received!\n\nAmount: {amount_eth} ETH\nCredited: ${amount_usd}\nNew balance: {format_usd(new_balance)}",
-)
+            # 🔥 notify user
+            send_message(
+                user_id,
+                f"💰 Deposit received!\n\nAmount: {amount_eth} ETH\nCredited: ${amount_usd}\nNew balance: {format_usd(new_balance)}",
+            )
 
     except Exception as e:
         print(f"ETH check error: {e}")
