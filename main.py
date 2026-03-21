@@ -469,7 +469,7 @@ def check_eth_deposits():
             amount_usd = (amount_eth * price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
             # skip tiny balances
-            if amount_usd < Decimal("1.00"):
+            if amount_usd < Decimal("0.01"):
                 continue
 
             # check if already credited (simple protection)
