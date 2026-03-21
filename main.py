@@ -303,22 +303,29 @@ def get_price_map() -> Dict[str, Decimal]:
         "LTC": "litecoin",
         "TON": "the-open-network",
     }
+
     joined = ",".join(ids.values())
+
     resp = requests.get(
         "https://api.coingecko.com/api/v3/simple/price",
         params={"ids": joined, "vs_currencies": "usd"},
         timeout=20,
     )
+
     data = resp.json()
 
     prices: Dict[str, Decimal] = {}
+
     for coin, coin_id in ids.items():
         usd = data.get(coin_id, {}).get("usd")
-        if usd is None:
-            raise RuntimeError(f"Missing price for {coin}")
-        prices[coin] = Decimal(str(usd))
-    return prices
 
+        if usd is None:
+            print(f"Warning: Missing price for {coin}")
+            continue
+
+        prices[coin] = Decimal(str(usd))
+
+    return prices
 def verify_eth(tx_hash: str, prices: Dict[str, Decimal]):
     try:
         tx_resp = requests.get(
