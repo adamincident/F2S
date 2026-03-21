@@ -521,7 +521,12 @@ def check_eth_deposits():
 
         for row in rows:
             user_id = row["user_id"]
-            address = row["eth_address"].lower()
+            eth_address = row["eth_address"]
+
+            if not eth_address:
+                continue
+
+            address = eth_address.lower()
             last_balance_wei = int(row["last_balance_wei"] or "0")
 
             resp = requests.post(
@@ -535,9 +540,17 @@ def check_eth_deposits():
                 timeout=20,
             )
 
-            data = resp.json()
-            balance_hex = data.get("result")
+            try:
+                data = resp.json()
+            except Exception:
+                print(f"[ETH CHECK] bad RPC response for {address}")
+                continue
 
+            if not isinstance(data, dict):
+                print(f"[ETH CHECK] invalid RPC payload for {address}: {data}")
+                continue
+
+            balance_hex = data.get("result")
             if not balance_hex:
                 continue
 
@@ -548,29 +561,38 @@ def check_eth_deposits():
 
             delta_wei = current_balance_wei - last_balance_wei
             amount_eth = Decimal(delta_wei) / Decimal(10**18)
-            amount_usd = (amount_eth * eth_price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            amount_usd = (amount_eth * eth_price).quantize(
+                Decimal("0.01"),
+                rounding=ROUND_HALF_UP
+            )
 
-            # 🔥 update stored balance
             cur.execute(
                 "UPDATE addresses SET last_balance_wei = ? WHERE user_id = ?",
                 (str(current_balance_wei), user_id),
             )
             conn.commit()
 
-            # 🔥 credit user
             new_balance = add_balance(user_id, amount_usd)
 
-            # 🔥 sweep
             cur.execute("SELECT private_key FROM addresses WHERE user_id = ?", (user_id,))
             pk_row = cur.fetchone()
 
-            if pk_row:
-                sweep_eth(pk_row["private_key"], address)
+            if pk_row and pk_row["private_key"]:
+                try:
+                    sweep_eth(pk_row["private_key"], address)
+                    print(f"[ETH SWEEP] success for user {user_id}")
+                except Exception as sweep_error:
+                    print(f"[ETH SWEEP ERROR] {sweep_error}")
 
-            # 🔥 notify user
             send_message(
                 user_id,
-                f"💰 Deposit received!\n\nAmount: {amount_eth} ETH\nCredited: ${amount_usd}\nNew balance: {format_usd(new_balance)}",
+                (
+                    "✅ <b>Deposit Received</b>\n\n"
+                    f"• Amount: {amount_eth} ETH\n"
+                    f"• Credited: {format_usd(amount_usd)}\n"
+                    f"• New balance: {format_usd(new_balance)}"
+                ),
+                parse_mode="HTML",
             )
 
     except Exception as e:
@@ -1236,7 +1258,6 @@ def handle_update(update: Dict[str, Any]) -> None:
     elif "callback_query" in update:
         handle_callback(update["callback_query"])
 
-
 def main() -> None:
     init_db()
     print("Fund2Say bot is running...")
@@ -1245,7 +1266,6 @@ def main() -> None:
     while True:
         try:
             check_eth_deposits()
-            check_tron_deposits()
 
             data = get_updates(offset)
             for update in data.get("result", []):
@@ -1256,7 +1276,8 @@ def main() -> None:
             print(f"Error: {e}")
             time.sleep(3)
 
-        time.sleep(5)
+        time.sleep(10)
+
 
 if __name__ == "__main__":
     main()
