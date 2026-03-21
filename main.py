@@ -328,7 +328,29 @@ def get_price_map() -> Dict[str, Decimal]:
     return prices
 def verify_eth(tx_hash: str, prices: Dict[str, Decimal]):
     try:
+        # 🔥 get transaction receipt (more reliable)
         resp = requests.post(
+            "https://rpc.ankr.com/eth",
+            json={
+                "jsonrpc": "2.0",
+                "method": "eth_getTransactionReceipt",
+                "params": [tx_hash],
+                "id": 1,
+            },
+            timeout=20,
+        )
+
+        data = resp.json()
+        receipt = data.get("result")
+
+        if not receipt:
+            return False, "Transaction not found or not confirmed yet.", Decimal("0"), Decimal("0")
+
+        if receipt.get("status") != "0x1":
+            return False, "Transaction failed.", Decimal("0"), Decimal("0")
+
+        # 🔥 now get full tx for value
+        tx_resp = requests.post(
             "https://rpc.ankr.com/eth",
             json={
                 "jsonrpc": "2.0",
@@ -339,11 +361,11 @@ def verify_eth(tx_hash: str, prices: Dict[str, Decimal]):
             timeout=20,
         )
 
-        data = resp.json()
-        tx = data.get("result")
+        tx_data = tx_resp.json()
+        tx = tx_data.get("result")
 
         if not tx:
-            return False, "Transaction not found yet. Wait ~30 seconds and try again.", Decimal("0"), Decimal("0")
+            return False, "Transaction data unavailable.", Decimal("0"), Decimal("0")
 
         to_addr = (tx.get("to") or "").lower()
         if to_addr != WALLETS["ETH"].lower():
