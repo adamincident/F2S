@@ -1007,6 +1007,15 @@ def handle_claim(chat_id: int, user_id: int, text: str) -> None:
     _, coin, tx_hash = parts
     coin = coin.upper()
 
+    # 🔥 DISABLE ETH CLAIMS
+    if coin == "ETH":
+        send_message(
+            chat_id,
+            "ETH deposits are detected automatically.\n\nUse Deposit → ETH and send directly to your assigned address.",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
+
     if coin not in WALLETS:
         send_message(chat_id, "Unsupported coin. Use BTC, ETH, XRP, SOL, TRON, LTC, or TON.")
         return
@@ -1016,6 +1025,7 @@ def handle_claim(chat_id: int, user_id: int, text: str) -> None:
         return
 
     send_message(chat_id, f"Checking {coin} transaction...\nThis can take a few seconds.")
+
     try:
         ok, msg, amount_coin, amount_usd = verify_claim(coin, tx_hash)
     except Exception as e:
