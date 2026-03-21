@@ -332,31 +332,40 @@ def verify_eth(tx_hash: str, prices: Dict[str, Decimal]):
             timeout=20,
         )
 
-        tx_data = tx_resp.json()
+        # 🔥 safe JSON parsing
+        try:
+            tx_data = tx_resp.json()
+        except:
+            return False, "ETH API returned invalid response.", Decimal("0"), Decimal("0")
+
+        # 🔥 FIX: handle string responses (rate limit, errors)
+        if isinstance(tx_data, str):
+            return False, f"ETH API error: {tx_data}", Decimal("0"), Decimal("0")
 
         if not isinstance(tx_data, dict):
-            return False, "Invalid response from ETH API.", Decimal("0"), Decimal("0")
+            return False, "Unexpected ETH API format.", Decimal("0"), Decimal("0")
 
         tx = tx_data.get("result")
+
         if not tx:
-            return False, "ETH transaction not found.", Decimal("0"), Decimal("0")
+            return False, "Transaction not found or not confirmed yet.", Decimal("0"), Decimal("0")
 
         to_addr = (tx.get("to") or "").lower()
         if to_addr != WALLETS["ETH"].lower():
-            return False, "Wrong ETH address.", Decimal("0"), Decimal("0")
+            return False, "Transaction not sent to your ETH wallet.", Decimal("0"), Decimal("0")
 
         value_wei = int(tx.get("value", "0x0"), 16)
+
+        if value_wei <= 0:
+            return False, "No ETH value found.", Decimal("0"), Decimal("0")
+
         amount_coin = Decimal(value_wei) / Decimal(10**18)
-
-        if amount_coin <= 0:
-            return False, "No ETH detected.", Decimal("0"), Decimal("0")
-
         amount_usd = (amount_coin * prices["ETH"]).quantize(Decimal("0.01"))
 
         return True, "ok", amount_coin, amount_usd
 
     except Exception as e:
-        return False, f"ETH check error: {str(e)}", Decimal("0"), Decimal("0")
+        return False, f"ETH error: {str(e)}", Decimal("0"), Decimal("0")
 
 def verify_btc_like(tx_hash: str, coin: str, prices: Dict[str, Decimal]) -> Tuple[bool, str, Decimal, Decimal]:
     chain_slug = "bitcoin" if coin == "BTC" else "litecoin"
