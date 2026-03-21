@@ -4,6 +4,8 @@ import time
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, Optional, Tuple
 from eth_account import Account
+from tronpy import Tron
+from tronpy.keys import PrivateKey
 
 import requests
 
@@ -14,6 +16,7 @@ BOT_TOKEN = "8709397983:AAGN-NhPOlSZUgRgAX_mqO3X9Zj7AaXiYKo"
 CHANNEL_ID = "-1003764332533"
 
 MAIN_ETH_WALLET = "0x0eAd9196934aA92d24B16060E78D644d4198606e"
+MAIN_TRON_WALLET = "TEoPpnymKPkf7BKpnASM8QNPa5bETzKX25"
 
 PRICE_PER_CHAR = Decimal("0.35")
 MIN_CHARS = 3
@@ -35,6 +38,7 @@ WALLETS = {
 ETHERSCAN_API_KEY = "V7AKCX4IDTP6HMD9XYHS52SZM578B4IJF6"
 
 BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
+tron = Tron()
 
 # =========================
 # DB
@@ -45,6 +49,7 @@ conn.row_factory = sqlite3.Row
 
 def init_db() -> None:
     cur = conn.cursor()
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
@@ -57,6 +62,7 @@ def init_db() -> None:
             last_post_at INTEGER NOT NULL DEFAULT 0
         )
     """)
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS claims (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,6 +74,7 @@ def init_db() -> None:
             claimed_at INTEGER NOT NULL
         )
     """)
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS addresses (
             user_id INTEGER PRIMARY KEY,
@@ -77,8 +84,19 @@ def init_db() -> None:
         )
     """)
 
+    # 🔥 TRON columns
     try:
-        cur.execute("ALTER TABLE addresses ADD COLUMN last_balance_wei TEXT NOT NULL DEFAULT '0'")
+        cur.execute("ALTER TABLE addresses ADD COLUMN tron_address TEXT")
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        cur.execute("ALTER TABLE addresses ADD COLUMN tron_private_key TEXT")
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        cur.execute("ALTER TABLE addresses ADD COLUMN last_trx_balance TEXT NOT NULL DEFAULT '0'")
     except sqlite3.OperationalError:
         pass
 
@@ -120,6 +138,31 @@ def get_or_create_eth_address(user_id: int):
     conn.commit()
 
     return address
+
+def get_or_create_tron_address(user_id: int):
+    cur = conn.cursor()
+
+    cur.execute("SELECT tron_address FROM addresses WHERE user_id = ?", (user_id,))
+    row = cur.fetchone()
+
+    if row and row["tron_address"]:
+        return row["tron_address"]
+
+    private_key = PrivateKey.random()
+    tron_address = private_key.public_key.to_base58check_address()
+    tron_private_key = private_key.hex()
+
+    cur.execute(
+        """
+        UPDATE addresses
+        SET tron_address = ?, tron_private_key = ?, last_trx_balance = '0'
+        WHERE user_id = ?
+        """,
+        (tron_address, tron_private_key, user_id),
+    )
+    conn.commit()
+
+    return tron_address
 
 def update_user_profile(user_id: int, username: Optional[str], first_name: Optional[str]) -> None:
     cur = conn.cursor()
@@ -496,6 +539,105 @@ def check_eth_deposits():
     except Exception as e:
         print(f"ETH check error: {e}")
 
+def check_tron_deposits():
+    try:
+        cur = conn.cursor()
+        prices = get_price_map()
+        trx_price = prices.get("TRON", Decimal("0"))
+
+        cur.execute("""
+            SELECT user_id, tron_address, last_trx_balance
+            FROM addresses
+            WHERE tron_address IS NOT NULL
+        """)
+        rows = cur.fetchall()
+
+        print(f"[TRON CHECK] scanning {len(rows)} addresses")
+
+        for row in rows:
+            user_id = row["user_id"]
+            address = row["tron_address"]
+            last_balance_sun = int(row["last_trx_balance"] or "0")
+
+            current_balance_trx = tron.get_account_balance(address)
+            current_balance_sun = int(Decimal(str(current_balance_trx)) * Decimal("1000000"))
+
+            print(
+                f"[TRON CHECK] user={user_id} "
+                f"last={last_balance_sun} current={current_balance_sun}"
+            )
+
+            if current_balance_sun <= last_balance_sun:
+                continue
+
+            delta_sun = current_balance_sun - last_balance_sun
+            amount_trx = Decimal(delta_sun) / Decimal("1000000")
+            amount_usd = (amount_trx * trx_price).quantize(
+                Decimal("0.01"),
+                rounding=ROUND_HALF_UP
+            )
+
+            cur.execute(
+                "UPDATE addresses SET last_trx_balance = ? WHERE user_id = ?",
+                (str(current_balance_sun), user_id),
+            )
+            conn.commit()
+
+            new_balance = add_balance(user_id, amount_usd)
+
+            cur.execute("SELECT tron_private_key FROM addresses WHERE user_id = ?", (user_id,))
+            pk_row = cur.fetchone()
+
+            if pk_row and pk_row["tron_private_key"]:
+                try:
+                    sweep_tron(pk_row["tron_private_key"])
+                    print(f"[TRON SWEEP] success for user {user_id}")
+                except Exception as sweep_error:
+                    print(f"[TRON SWEEP ERROR] {sweep_error}")
+
+            send_message(
+                user_id,
+                (
+                    "✅ <b>Deposit Received</b>\n\n"
+                    f"• Amount: {amount_trx} TRX\n"
+                    f"• Credited: {format_usd(amount_usd)}\n"
+                    f"• New balance: {format_usd(new_balance)}"
+                ),
+                parse_mode="HTML",
+            )
+
+    except Exception as e:
+        print(f"TRON check error: {e}")
+
+def sweep_tron(private_key_hex: str):
+    try:
+        pk = PrivateKey(bytes.fromhex(private_key_hex))
+        owner = pk.public_key.to_base58check_address()
+
+        balance_trx = tron.get_account_balance(owner)
+        if balance_trx <= Decimal("0"):
+            return
+
+        reserve = Decimal("1")
+        send_amount = Decimal(str(balance_trx)) - reserve
+
+        if send_amount <= Decimal("0"):
+            print(f"[TRON SWEEP] Not enough TRX to sweep from {owner}")
+            return
+
+        txn = (
+            tron.trx.transfer(owner, MAIN_TRON_WALLET, int(send_amount * Decimal("1000000")))
+            .memo("Fund2Say sweep")
+            .build()
+            .sign(pk)
+        )
+        result = txn.broadcast()
+
+        print(f"[TRON SWEEP] {owner} -> {MAIN_TRON_WALLET} | result={result}")
+
+    except Exception as e:
+        print(f"[TRON SWEEP ERROR] {e}")
+
 from web3 import Web3
 
 w3 = Web3(Web3.HTTPProvider("https://eth.llamarpc.com"))
@@ -746,10 +888,18 @@ def handle_show_coin(chat_id: int, coin: str, user_id: int) -> None:
     if coin == "ETH":
         address = get_or_create_eth_address(user_id)
         text = (
-            f"<b>{coin} Deposit</b>\n\n"
+            f"💎 <b>{coin} Deposit</b>\n\n"
             f"<code>{html.escape(address)}</code>\n\n"
-            f"Send ETH directly to this address.\n"
-            f"Your balance will update automatically."
+            "Send ETH directly to this address.\n"
+            "Your balance updates automatically."
+        )
+    elif coin == "TRON":
+        address = get_or_create_tron_address(user_id)
+        text = (
+            f"💎 <b>{coin} Deposit</b>\n\n"
+            f"<code>{html.escape(address)}</code>\n\n"
+            "Send TRX directly to this address.\n"
+            "Your balance updates automatically."
         )
     else:
         address = WALLETS[coin]
@@ -1058,6 +1208,7 @@ def main() -> None:
     while True:
         try:
             check_eth_deposits()
+            check_tron_deposits()
 
             data = get_updates(offset)
             for update in data.get("result", []):
