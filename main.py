@@ -9,7 +9,7 @@ import requests
 # =========================
 # CONFIG
 # =========================
-BOT_TOKEN = "8709397983:AAF7AqwtpAUU1Xh9JeWQOZjhmW2tVkbFAC0"
+BOT_TOKEN = "8709397983:AAGN-NhPOlSZUgRgAX_mqO3X9Zj7AaXiYKo"
 CHANNEL_ID = "-1003764332533"
 
 PRICE_PER_CHAR = Decimal("0.35")
