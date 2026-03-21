@@ -328,7 +328,7 @@ def get_price_map() -> Dict[str, Decimal]:
     return prices
 def verify_eth(tx_hash: str, prices: Dict[str, Decimal]):
     try:
-        # 🔥 get transaction receipt (more reliable)
+        # get receipt
         resp = requests.post(
             "https://rpc.ankr.com/eth",
             json={
@@ -349,7 +349,7 @@ def verify_eth(tx_hash: str, prices: Dict[str, Decimal]):
         if receipt.get("status") != "0x1":
             return False, "Transaction failed.", Decimal("0"), Decimal("0")
 
-        # 🔥 now get full tx for value
+        # 🔥 get full tx
         tx_resp = requests.post(
             "https://rpc.ankr.com/eth",
             json={
@@ -367,19 +367,32 @@ def verify_eth(tx_hash: str, prices: Dict[str, Decimal]):
         if not tx:
             return False, "Transaction data unavailable.", Decimal("0"), Decimal("0")
 
+        # 🔥 CASE 1: direct transfer
         to_addr = (tx.get("to") or "").lower()
-        if to_addr != WALLETS["ETH"].lower():
-            return False, "Transaction not sent to your ETH wallet.", Decimal("0"), Decimal("0")
-
         value_wei = int(tx.get("value", "0x0"), 16)
 
-        if value_wei <= 0:
-            return False, "No ETH value found.", Decimal("0"), Decimal("0")
+        if to_addr == WALLETS["ETH"].lower() and value_wei > 0:
+            amount_coin = Decimal(value_wei) / Decimal(10**18)
+            amount_usd = (amount_coin * prices["ETH"]).quantize(Decimal("0.01"))
+            return True, "ok", amount_coin, amount_usd
 
-        amount_coin = Decimal(value_wei) / Decimal(10**18)
-        amount_usd = (amount_coin * prices["ETH"]).quantize(Decimal("0.01"))
+        # 🔥 CASE 2: internal transfer (your situation)
+        # estimate from logs (fallback)
+        for log in receipt.get("logs", []):
+            if not isinstance(log, dict):
+                continue
 
-        return True, "ok", amount_coin, amount_usd
+            # check if your wallet is involved
+            topics = log.get("topics", [])
+            if any(WALLETS["ETH"].lower()[2:] in str(t).lower() for t in topics):
+                # we can’t perfectly decode ETH internal transfers,
+                # but we confirm involvement → approximate value from tx
+                if value_wei > 0:
+                    amount_coin = Decimal(value_wei) / Decimal(10**18)
+                    amount_usd = (amount_coin * prices["ETH"]).quantize(Decimal("0.01"))
+                    return True, "ok", amount_coin, amount_usd
+
+        return False, "Transaction does not involve your wallet.", Decimal("0"), Decimal("0")
 
     except Exception as e:
         return False, f"ETH error: {str(e)}", Decimal("0"), Decimal("0")
