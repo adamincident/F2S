@@ -17,7 +17,7 @@ MIN_CHARS = 3
 MAX_CHARS = 3000
 POST_COOLDOWN_SECONDS = 30
 POLL_TIMEOUT = 30
-DB_PATH = "pay2post.db"
+DB_PATH = "Fund2Say.db"
 
 WALLETS = {
     "BTC": "bc1q96rxp2wrx4jcfnkgre32umfq4kr20pyc9vfsps",
@@ -267,7 +267,7 @@ def cost_for_message(message: str) -> Decimal:
 
 def welcome_text() -> str:
     return (
-        "Welcome to <b>Pay2Post</b>\n\n"
+        "Welcome to <b>Fund2Say</b>\n\n"
         "Send a paid message to the channel using your crypto balance.\n\n"
         f"• Price: {format_usd(PRICE_PER_CHAR)} per character\n"
         f"• Minimum: {MIN_CHARS} characters ({format_usd(PRICE_PER_CHAR * MIN_CHARS)})\n"
@@ -278,7 +278,7 @@ def welcome_text() -> str:
 
 def help_text() -> str:
     return (
-        "<b>How Pay2Post works</b>\n\n"
+        "<b>How Fund2Say works</b>\n\n"
         "1. Tap <b>Deposit</b> and choose a coin.\n"
         "2. Send crypto to the shown address.\n"
         "3. Claim it with:\n"
@@ -342,7 +342,7 @@ def verify_eth(tx_hash: str, prices: Dict[str, Decimal]) -> Tuple[bool, str, Dec
 
     to_addr = (tx.get("to") or "").lower()
     if to_addr != WALLETS["ETH"].lower():
-        return False, "This ETH transaction was not sent to the Pay2Post ETH address.", Decimal("0"), Decimal("0")
+        return False, "This ETH transaction was not sent to the Fund2Say ETH address.", Decimal("0"), Decimal("0")
 
     receipt_resp = requests.get(
         "https://api.etherscan.io/v2/api",
@@ -389,7 +389,7 @@ def verify_btc_like(tx_hash: str, coin: str, prices: Dict[str, Decimal]) -> Tupl
             satoshis += int(out.get("value", 0))
 
     if satoshis <= 0:
-        return False, f"This {coin} transaction was not sent to the Pay2Post {coin} address.", Decimal("0"), Decimal("0")
+        return False, f"This {coin} transaction was not sent to the Fund2Say {coin} address.", Decimal("0"), Decimal("0")
 
     amount_coin = Decimal(satoshis) / Decimal(10**8)
     amount_usd = (amount_coin * prices[coin]).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -419,7 +419,7 @@ def verify_sol(tx_hash: str, prices: Dict[str, Decimal]) -> Tuple[bool, str, Dec
     try:
         idx = account_keys.index(WALLETS["SOL"])
     except ValueError:
-        return False, "This SOL transaction does not involve the Pay2Post SOL address.", Decimal("0"), Decimal("0")
+        return False, "This SOL transaction does not involve the Fund2Say SOL address.", Decimal("0"), Decimal("0")
 
     pre_bal = meta.get("preBalances", [])
     post_bal = meta.get("postBalances", [])
@@ -428,7 +428,7 @@ def verify_sol(tx_hash: str, prices: Dict[str, Decimal]) -> Tuple[bool, str, Dec
 
     lamports_received = int(post_bal[idx]) - int(pre_bal[idx])
     if lamports_received <= 0:
-        return False, "No incoming SOL was detected for the Pay2Post SOL address.", Decimal("0"), Decimal("0")
+        return False, "No incoming SOL was detected for the Fund2Say SOL address.", Decimal("0"), Decimal("0")
 
     amount_coin = Decimal(lamports_received) / Decimal(10**9)
     amount_usd = (amount_coin * prices["SOL"]).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -448,7 +448,7 @@ def verify_xrp(tx_hash: str, prices: Dict[str, Decimal]) -> Tuple[bool, str, Dec
 
     destination = tx.get("Destination")
     if destination != WALLETS["XRP"]:
-        return False, "This XRP transaction was not sent to the Pay2Post XRP address.", Decimal("0"), Decimal("0")
+        return False, "This XRP transaction was not sent to the Fund2Say XRP address.", Decimal("0"), Decimal("0")
 
     amount_drops = tx.get("Amount")
     if not amount_drops or not str(amount_drops).isdigit():
@@ -470,7 +470,7 @@ def verify_tron(tx_hash: str, prices: Dict[str, Decimal]) -> Tuple[bool, str, De
 
     to_addr = data.get("toAddress")
     if to_addr != WALLETS["TRON"]:
-        return False, "This TRON transaction was not sent to the Pay2Post TRON address.", Decimal("0"), Decimal("0")
+        return False, "This TRON transaction was not sent to the Fund2Say TRON address.", Decimal("0"), Decimal("0")
 
     amount_sun = int(data.get("amount", 0))
     if amount_sun <= 0:
@@ -498,7 +498,7 @@ def verify_ton(tx_hash: str, prices: Dict[str, Decimal]) -> Tuple[bool, str, Dec
         in_msg = tx.get("in_msg") or {}
         value = int(in_msg.get("value", 0))
         if value <= 0:
-            return False, "No incoming TON was detected for the Pay2Post TON address.", Decimal("0"), Decimal("0")
+            return False, "No incoming TON was detected for the Fund2Say TON address.", Decimal("0"), Decimal("0")
 
         amount_coin = Decimal(value) / Decimal(10**9)
         amount_usd = (amount_coin * prices["TON"]).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -868,7 +868,7 @@ def handle_update(update: Dict[str, Any]) -> None:
 
 def main() -> None:
     init_db()
-    print("Pay2Post bot is running...")
+    print("Fund2Say bot is running...")
     offset: Optional[int] = None
 
     while True:
