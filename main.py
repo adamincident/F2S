@@ -332,23 +332,17 @@ def verify_eth(tx_hash: str, prices: Dict[str, Decimal]):
             timeout=20,
         )
 
-        # 🔥 safe JSON parsing
-        try:
-            tx_data = tx_resp.json()
-        except:
-            return False, "ETH API returned invalid response.", Decimal("0"), Decimal("0")
+        tx_data = tx_resp.json()
 
-        # 🔥 FIX: handle string responses (rate limit, errors)
-        if isinstance(tx_data, str):
-            return False, f"ETH API error: {tx_data}", Decimal("0"), Decimal("0")
-
-        if not isinstance(tx_data, dict):
-            return False, "Unexpected ETH API format.", Decimal("0"), Decimal("0")
+        # 🔥 handle etherscan errors properly
+        if tx_data.get("status") == "0":
+            return False, f"ETH API error: {tx_data.get('result')}", Decimal("0"), Decimal("0")
 
         tx = tx_data.get("result")
 
-        if not tx:
-            return False, "Transaction not found or not confirmed yet.", Decimal("0"), Decimal("0")
+        # 🔥 critical fix
+        if not isinstance(tx, dict):
+            return False, "Invalid transaction data received.", Decimal("0"), Decimal("0")
 
         to_addr = (tx.get("to") or "").lower()
         if to_addr != WALLETS["ETH"].lower():
