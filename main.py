@@ -351,11 +351,12 @@ def get_price_map() -> Dict[str, Decimal]:
 
     prices: Dict[str, Decimal] = {}
 
-    for coin, coin_id in ids.items():
-usd = data.get(coin_id, {}).get("usd", 0)
-prices[coin] = Decimal(str(usd))
+for coin, coin_id in ids.items():
+    usd = data.get(coin_id, {}).get("usd", 0)
+    prices[coin] = Decimal(str(usd))
 
-    return prices
+return prices
+
 def verify_eth(tx_hash: str, prices: Dict[str, Decimal]):
     try:
         # get receipt
