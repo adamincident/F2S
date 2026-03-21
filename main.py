@@ -503,7 +503,8 @@ w3 = Web3(Web3.HTTPProvider("https://eth.llamarpc.com"))
 
 def sweep_eth(private_key: str, from_address: str):
     try:
-        account = w3.eth.account.from_key(private_key)
+        from_address = Web3.to_checksum_address(from_address)
+        to_address = Web3.to_checksum_address(MAIN_ETH_WALLET)
 
         balance = w3.eth.get_balance(from_address)
 
@@ -512,19 +513,18 @@ def sweep_eth(private_key: str, from_address: str):
 
         gas_price = w3.eth.gas_price
         gas_limit = 21000
-
         fee = gas_price * gas_limit
 
         if balance <= fee:
+            print(f"[SWEEP] Not enough ETH to cover gas for {from_address}")
             return
 
         value = balance - fee
-
         nonce = w3.eth.get_transaction_count(from_address)
 
         tx = {
             "nonce": nonce,
-            "to": MAIN_ETH_WALLET,
+            "to": to_address,
             "value": value,
             "gas": gas_limit,
             "gasPrice": gas_price,
@@ -532,10 +532,9 @@ def sweep_eth(private_key: str, from_address: str):
         }
 
         signed_tx = w3.eth.account.sign_transaction(tx, private_key)
+        tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
 
-        tx_hash = w3.eth.send_raw_transaction(signed_tx.rawTransaction)
-
-        print(f"[SWEEP] Sent {value} wei → {MAIN_ETH_WALLET} | tx: {tx_hash.hex()}")
+        print(f"[SWEEP] Sent {value} wei → {to_address} | tx: {tx_hash.hex()}")
 
     except Exception as e:
         print(f"[SWEEP ERROR] {e}")
