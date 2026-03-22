@@ -487,11 +487,13 @@ def main_menu_keyboard() -> Dict[str, Any]:
             ],
             [
                 {"text": "✍️ Send Message", "callback_data": "menu_send"},
+                {"text": "🏆 Leaderboard", "callback_data": "menu_leaderboard"},
+            ],
+            [
                 {"text": "❓ Help", "callback_data": "menu_help"},
             ],
         ]
     }
-
 def deposit_keyboard() -> Dict[str, Any]:
     return {
         "inline_keyboard": [
