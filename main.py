@@ -10,6 +10,9 @@ from tronpy.providers import HTTPProvider
 from solders.keypair import Keypair
 from solana.rpc.api import Client
 from solders.pubkey import Pubkey
+from solders.message import Message
+from solders.system_program import TransferParams, transfer
+from solders.transaction import Transaction
 
 tron = Tron(
     provider=HTTPProvider(
@@ -261,7 +264,7 @@ def get_or_create_sol_address(user_id: int):
 
     kp = Keypair()
     address = str(kp.pubkey())
-    private_key = kp.to_bytes().hex()
+    private_key = bytes(kp).hex()
 
     cur.execute("""
         UPDATE addresses
@@ -937,9 +940,44 @@ def sweep_eth(private_key: str, from_address: str):
         print(f"[SWEEP ERROR] {e}")
 
 def sweep_sol(private_key_hex: str):
-    # 🔥 temporarily disabled (safe)
-    print("[SOL SWEEP] skipped (disabled)")
-    return
+    try:
+        kp = Keypair.from_bytes(bytes.fromhex(private_key_hex))
+        from_pubkey = kp.pubkey()
+        to_pubkey = Pubkey.from_string(MAIN_SOL_WALLET)
+
+        balance_resp = sol_client.get_balance(from_pubkey)
+        balance = balance_resp.value
+
+        if balance <= 0:
+            return
+
+        # keep small reserve
+        reserve = 2_000_000  # 0.002 SOL
+        send_amount = balance - reserve
+
+        if send_amount <= 0:
+            print(f"[SOL SWEEP] Not enough SOL to sweep from {from_pubkey}")
+            return
+
+        ix = transfer(
+            TransferParams(
+                from_pubkey=from_pubkey,
+                to_pubkey=to_pubkey,
+                lamports=send_amount,
+            )
+        )
+
+        recent_blockhash = sol_client.get_latest_blockhash().value.blockhash
+
+        msg = Message([ix], from_pubkey)
+        tx = Transaction([kp], msg, recent_blockhash)
+
+        resp = sol_client.send_transaction(tx)
+
+        print(f"[SOL SWEEP] {from_pubkey} -> {to_pubkey} | sig={resp.value}")
+
+    except Exception as e:
+        print(f"[SOL SWEEP ERROR] {e}")
 
 def verify_btc_like(tx_hash: str, coin: str, prices: Dict[str, Decimal]) -> Tuple[bool, str, Decimal, Decimal]:
     chain_slug = "bitcoin" if coin == "BTC" else "litecoin"
