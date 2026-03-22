@@ -645,7 +645,7 @@ def check_tron_deposits():
         print(f"[TRON CHECK] scanning {len(rows)} addresses")
 
         for row in rows:
-            time.sleep(0.2)  # 🔥 prevents rate limit (VERY IMPORTANT)
+            time.sleep(0.2)  # 🔥 prevents rate limiting
 
             user_id = row["user_id"]
             address = row["tron_address"]
@@ -654,6 +654,8 @@ def check_tron_deposits():
             try:
                 current_balance_trx = tron.get_account_balance(address)
             except Exception as e:
+                if "account not found" in str(e).lower():
+                    continue  # 🔥 normal → skip silently
                 print(f"[TRON ERROR] {address} {e}")
                 continue
 
@@ -673,7 +675,6 @@ def check_tron_deposits():
             )
 
             if amount_usd < MIN_DEPOSIT_USD:
-                print(f"[TRON] Ignored tiny deposit user={user_id} ${amount_usd}")
                 cur.execute(
                     "UPDATE addresses SET last_trx_balance = ? WHERE user_id = ?",
                     (str(current_balance_sun), user_id),
@@ -714,7 +715,6 @@ def check_tron_deposits():
 
     except Exception as e:
         print(f"TRON check error: {e}")
-
 def sweep_tron(private_key_hex: str):
     try:
         pk = PrivateKey(bytes.fromhex(private_key_hex))
