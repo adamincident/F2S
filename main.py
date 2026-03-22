@@ -165,41 +165,43 @@ def get_or_create_eth_address(user_id: int):
 def get_or_create_tron_address(user_id: int):
     cur = conn.cursor()
 
-    cur.execute("SELECT tron_address FROM addresses WHERE user_id = ?", (user_id,))
+    # Ensure row exists
+    cur.execute("SELECT * FROM addresses WHERE user_id = ?", (user_id,))
     row = cur.fetchone()
 
-    if row and row["tron_address"]:
-        return row["tron_address"]
+    if row:
+        if row["tron_address"]:
+            return row["tron_address"]
+    else:
+        cur.execute("""
+            INSERT INTO addresses (
+                user_id,
+                eth_address,
+                private_key,
+                last_balance_wei,
+                tron_address,
+                tron_private_key,
+                last_trx_balance
+            )
+            VALUES (?, NULL, NULL, '0', NULL, NULL, '0')
+        """, (user_id,))
+        conn.commit()
 
+    # Create wallet ONLY if missing
     private_key = PrivateKey.random()
     tron_address = private_key.public_key.to_base58check_address()
     tron_private_key = private_key.hex()
 
-    cur.execute("SELECT 1 FROM addresses WHERE user_id = ?", (user_id,))
-    existing = cur.fetchone()
-
-    if existing:
-        cur.execute(
-            """
-            UPDATE addresses
-            SET tron_address = ?, tron_private_key = ?, last_trx_balance = '0'
-            WHERE user_id = ?
-            """,
-            (tron_address, tron_private_key, user_id),
-        )
-    else:
-        cur.execute(
-            """
-            INSERT INTO addresses (
-                user_id, eth_address, private_key, last_balance_wei,
-                tron_address, tron_private_key, last_trx_balance
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (user_id, None, None, "0", tron_address, tron_private_key, "0"),
-        )
+    cur.execute("""
+        UPDATE addresses
+        SET tron_address = ?, tron_private_key = ?, last_trx_balance = '0'
+        WHERE user_id = ?
+    """, (tron_address, tron_private_key, user_id))
 
     conn.commit()
+
+    print(f"[TRON ADDRESS CREATED] user={user_id} address={tron_address}")
+
     return tron_address
 
 def update_user_profile(user_id: int, username: Optional[str], first_name: Optional[str]) -> None:
@@ -624,6 +626,8 @@ def check_tron_deposits():
         prices = get_price_map()
         trx_price = prices.get("TRON", Decimal("0"))
 
+        MIN_DEPOSIT_USD = Decimal("1.00")
+
         cur.execute("""
             SELECT user_id, tron_address, last_trx_balance
             FROM addresses
@@ -638,24 +642,40 @@ def check_tron_deposits():
             address = row["tron_address"]
             last_balance_sun = int(row["last_trx_balance"] or "0")
 
-            current_balance_trx = tron.get_account_balance(address)
-            current_balance_sun = int(Decimal(str(current_balance_trx)) * Decimal("1000000"))
+            try:
+                current_balance_trx = tron.get_account_balance(address)
+            except Exception as e:
+                print(f"[TRON ERROR] {address} {e}")
+                continue
 
-            print(
-                f"[TRON CHECK] user={user_id} "
-                f"last={last_balance_sun} current={current_balance_sun}"
-            )
+            current_balance_sun = int(Decimal(str(current_balance_trx)) * Decimal("1000000"))
 
             if current_balance_sun <= last_balance_sun:
                 continue
 
             delta_sun = current_balance_sun - last_balance_sun
+            if delta_sun <= 0:
+                continue
+
             amount_trx = Decimal(delta_sun) / Decimal("1000000")
             amount_usd = (amount_trx * trx_price).quantize(
                 Decimal("0.01"),
                 rounding=ROUND_HALF_UP
             )
 
+            # Ignore tiny deposits
+            if amount_usd < MIN_DEPOSIT_USD:
+                print(f"[TRON] Ignored tiny deposit user={user_id} ${amount_usd}")
+                cur.execute(
+                    "UPDATE addresses SET last_trx_balance = ? WHERE user_id = ?",
+                    (str(current_balance_sun), user_id),
+                )
+                conn.commit()
+                continue
+
+            print(f"[TRON CREDIT] user={user_id} +{amount_trx} TRX (${amount_usd})")
+
+            # Update FIRST (prevents double credit)
             cur.execute(
                 "UPDATE addresses SET last_trx_balance = ? WHERE user_id = ?",
                 (str(current_balance_sun), user_id),
@@ -664,15 +684,16 @@ def check_tron_deposits():
 
             new_balance = add_balance(user_id, amount_usd)
 
+            # Sweep TRON
             cur.execute("SELECT tron_private_key FROM addresses WHERE user_id = ?", (user_id,))
             pk_row = cur.fetchone()
 
             if pk_row and pk_row["tron_private_key"]:
                 try:
                     sweep_tron(pk_row["tron_private_key"])
-                    print(f"[TRON SWEEP] success for user {user_id}")
-                except Exception as sweep_error:
-                    print(f"[TRON SWEEP ERROR] {sweep_error}")
+                    print(f"[TRON SWEEP] success user={user_id}")
+                except Exception as e:
+                    print(f"[TRON SWEEP ERROR] {e}")
 
             send_message(
                 user_id,
@@ -1297,6 +1318,7 @@ def main() -> None:
     while True:
         try:
             check_eth_deposits()
+            check_tron_deposits()
 
             data = get_updates(offset)
             for update in data.get("result", []):
