@@ -978,7 +978,16 @@ def check_sol_deposits():
             try:
                 pubkey = Pubkey.from_string(address)
                 resp = sol_client.get_balance(pubkey)
-                current_balance = resp.value
+
+                if not resp or resp.value is None:
+                    print(f"[SOL ERROR] bad response {address}")
+                    continue
+
+                current_balance = int(resp.value)
+
+                # 🔥 DEBUG LINE (HERE)
+                print(f"[SOL DEBUG] {address} current={current_balance} last={last_balance}")
+
             except Exception:
                 print(f"[SOL ERROR] {address}")
                 continue
