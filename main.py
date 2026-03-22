@@ -643,9 +643,14 @@ def get_price_map() -> Dict[str, Decimal]:
 
 def verify_eth(tx_hash: str, prices: Dict[str, Decimal]):
     try:
-        # get receipt
+        # 🔥 ensure price exists
+        eth_price = prices.get("ETH")
+        if not eth_price:
+            return False, "Price unavailable. Try again.", Decimal("0"), Decimal("0")
+
+        # 🔥 get receipt (Alchemy)
         resp = requests.post(
-            "https://eth.llamarpc.com",
+            "https://eth-mainnet.g.alchemy.com/v2/R9SivaKDqDjIUhA-H0ZlW",
             json={
                 "jsonrpc": "2.0",
                 "method": "eth_getTransactionReceipt",
@@ -666,7 +671,7 @@ def verify_eth(tx_hash: str, prices: Dict[str, Decimal]):
 
         # 🔥 get full tx
         tx_resp = requests.post(
-            "https://eth.llamarpc.com",
+            "https://eth-mainnet.g.alchemy.com/v2/R9SivaKDqDjIUhA-H0ZlW",
             json={
                 "jsonrpc": "2.0",
                 "method": "eth_getTransactionByHash",
@@ -688,23 +693,19 @@ def verify_eth(tx_hash: str, prices: Dict[str, Decimal]):
 
         if to_addr == WALLETS["ETH"].lower() and value_wei > 0:
             amount_coin = Decimal(value_wei) / Decimal(10**18)
-            amount_usd = (amount_coin * prices["ETH"]).quantize(Decimal("0.01"))
+            amount_usd = (amount_coin * eth_price).quantize(Decimal("0.01"))
             return True, "ok", amount_coin, amount_usd
 
-        # 🔥 CASE 2: internal transfer (your situation)
-        # estimate from logs (fallback)
+        # 🔥 CASE 2: internal transfer fallback
         for log in receipt.get("logs", []):
             if not isinstance(log, dict):
                 continue
 
-            # check if your wallet is involved
             topics = log.get("topics", [])
             if any(WALLETS["ETH"].lower()[2:] in str(t).lower() for t in topics):
-                # we can’t perfectly decode ETH internal transfers,
-                # but we confirm involvement → approximate value from tx
                 if value_wei > 0:
                     amount_coin = Decimal(value_wei) / Decimal(10**18)
-                    amount_usd = (amount_coin * prices["ETH"]).quantize(Decimal("0.01"))
+                    amount_usd = (amount_coin * eth_price).quantize(Decimal("0.01"))
                     return True, "ok", amount_coin, amount_usd
 
         return False, "Transaction does not involve your wallet.", Decimal("0"), Decimal("0")
