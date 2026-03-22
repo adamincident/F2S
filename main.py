@@ -1647,7 +1647,7 @@ def handle_callback(callback_query: Dict[str, Any]) -> None:
         send_message(chat_id, "Posting cancelled.", reply_markup=main_menu_keyboard())
         return
 
-    # 🔥 STEP 1 — CHOOSE TYPE (NORMAL / PREMIUM)
+    # 🔥 STEP 1 — CHOOSE TYPE
     if data in ("post_normal_public", "post_premium_public", "post_normal_anon", "post_premium_anon"):
         pending_message = user["pending_message"]
         pending_cost = user["pending_cost"]
@@ -1664,7 +1664,6 @@ def handle_callback(callback_query: Dict[str, Any]) -> None:
 
         cost = base_cost + Decimal("25.00") if is_premium else base_cost
 
-        # store mode in state
         mode = "premium" if is_premium else "normal"
         visibility = "anon" if is_anon else "public"
 
@@ -1675,9 +1674,7 @@ def handle_callback(callback_query: Dict[str, Any]) -> None:
             pending_cost=str(cost)
         )
 
-        prefix = ""
-        if is_premium:
-            prefix = "⭐ <b>PREMIUM MESSAGE</b>\n\n"
+        prefix = "⭐ <b>PREMIUM MESSAGE</b>\n\n" if is_premium else ""
 
         if is_anon:
             preview = prefix + build_anonymous_post(cost, pending_message)
@@ -1697,84 +1694,80 @@ def handle_callback(callback_query: Dict[str, Any]) -> None:
         )
         return
 
-# 🔥 STEP 2 — FINAL CONFIRM
-if data == "confirm_final":
-    pending_message = user["pending_message"]
-    pending_cost = user["pending_cost"]
-    state = user["state"] or ""
+    # 🔥 STEP 2 — FINAL CONFIRM (FIXED INDENT)
+    if data == "confirm_final":
+        pending_message = user["pending_message"]
+        pending_cost = user["pending_cost"]
+        state = user["state"] or ""
 
-    if not pending_message or not pending_cost:
-        send_message(chat_id, "No pending message found.", reply_markup=main_menu_keyboard())
+        if not pending_message or not pending_cost:
+            send_message(chat_id, "No pending message found.", reply_markup=main_menu_keyboard())
+            set_state(user_id, None, None, None)
+            return
+
+        allowed, remaining = can_post_now(user_id)
+        if not allowed:
+            send_message(
+                chat_id,
+                f"⏳ Slow down — wait {remaining} seconds before posting again.",
+                reply_markup=main_menu_keyboard(),
+            )
+            return
+
+        cost = Decimal(pending_cost)
+        ok, new_balance = deduct_balance(user_id, cost)
+
+        if not ok:
+            send_message(
+                chat_id,
+                "❌ Your balance is no longer enough for this post.",
+                reply_markup=main_menu_keyboard(),
+            )
+            set_state(user_id, None, None, None)
+            return
+
+        is_premium = "premium" in state
+        is_anon = "anon" in state
+
+        label = "⭐ <b>PREMIUM MESSAGE</b>\n\n" if is_premium else ""
+
+        if is_anon:
+            post = label + build_anonymous_post(cost, pending_message)
+        else:
+            post = label + build_public_post(user_id, display_name, cost, pending_message)
+
+        resp = tg_request("sendMessage", {
+            "chat_id": CHANNEL_ID,
+            "text": post,
+            "parse_mode": "HTML"
+        })
+
+        message_id = resp.get("result", {}).get("message_id")
+
+        print(f"[POST] user={user_id} cost={cost} premium={is_premium}")
+
+        if message_id:
+            is_top = handle_top_message(message_id, cost)
+
+            if is_top:
+                tg_request("sendMessage", {
+                    "chat_id": CHANNEL_ID,
+                    "text": f"🔥 <b>NEW TOP MESSAGE ({format_usd(cost)})</b>",
+                    "parse_mode": "HTML"
+                })
+
         set_state(user_id, None, None, None)
-        return
 
-    allowed, remaining = can_post_now(user_id)
-    if not allowed:
         send_message(
             chat_id,
-            f"⏳ Slow down — wait {remaining} seconds before posting again.",
+            (
+                f"✅ Message posted\n"
+                f"Charged: {format_usd(cost)}\n"
+                f"Remaining balance: {format_usd(new_balance)}\n\n"
+                "🔥 Want more attention? Send another one."
+            ),
             reply_markup=main_menu_keyboard(),
         )
-        return
-
-    cost = Decimal(pending_cost)
-    ok, new_balance = deduct_balance(user_id, cost)
-
-    if not ok:
-        send_message(
-            chat_id,
-            "❌ Your balance is no longer enough for this post.",
-            reply_markup=main_menu_keyboard(),
-        )
-        set_state(user_id, None, None, None)
-        return
-
-    # 🔥 detect premium
-    is_premium = "premium" in state
-
-    label = ""
-    if is_premium:
-        label = "⭐ <b>PREMIUM MESSAGE</b>\n\n"
-
-    post = label + build_public_post(user_id, display_name, cost, pending_message)
-
-    # 🔥 send message
-    resp = tg_request("sendMessage", {
-        "chat_id": CHANNEL_ID,
-        "text": post,
-        "parse_mode": "HTML"
-    })
-
-    print(f"[POST] user={user_id} cost={cost}")
-
-    message_id = resp.get("result", {}).get("message_id")
-
-    # 🔥 analytics
-    print(f"[POST] user={user_id} cost={cost} premium={is_premium}")
-
-    # 🔥 TOP MESSAGE SYSTEM
-    if message_id:
-        is_top = handle_top_message(message_id, cost)
-
-        if is_top:
-            tg_request("sendMessage", {
-                "chat_id": CHANNEL_ID,
-                "text": f"🔥 <b>NEW TOP MESSAGE ({format_usd(cost)})</b>",
-                "parse_mode": "HTML"
-            })
-
-    set_state(user_id, None, None, None)
-
-    send_message(
-        chat_id,
-        (
-            f"✅ Message posted\n"
-            f"Charged: {format_usd(cost)}\n"
-            f"Remaining balance: {format_usd(new_balance)}\n\n"
-            "🔥 Want more attention? Send another one."
-        ),
-        reply_markup=main_menu_keyboard(),
-    )
 
 def handle_update(update: Dict[str, Any]) -> None:
     if "message" in update:
