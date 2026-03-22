@@ -6,6 +6,13 @@ from typing import Any, Dict, Optional, Tuple
 from eth_account import Account
 from tronpy import Tron
 from tronpy.keys import PrivateKey
+from tronpy.providers import HTTPProvider
+
+tron = Tron(
+    provider=HTTPProvider(
+        api_key="9f159f8f-1cb9-45da-8388-4f93d9a53266"
+    )
+)
 
 import requests
 
@@ -38,11 +45,7 @@ WALLETS = {
 ETHERSCAN_API_KEY = "V7AKCX4IDTP6HMD9XYHS52SZM578B4IJF6"
 
 BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
-tron = Tron(
-    provider=Tron.HTTPProvider(
-        api_key="9f159f8f-1cb9-45da-8388-4f93d9a53266"
-    )
-)
+
 
 # =========================
 # DB
