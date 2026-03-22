@@ -1477,27 +1477,39 @@ def handle_update(update: Dict[str, Any]) -> None:
     elif "callback_query" in update:
         handle_callback(update["callback_query"])
 
-def main() -> None:
-    init_db()
-    print("Fund2Say bot is running...")
-    offset: Optional[int] = None
+import threading
 
+def deposit_worker():
     while True:
         try:
             check_eth_deposits()
             check_tron_deposits()
             check_sol_deposits()
+        except Exception as e:
+            print(f"[DEPOSIT LOOP ERROR] {e}")
+        time.sleep(10)  # adjust if needed
 
+
+def main() -> None:
+    init_db()
+    print("Fund2Say bot is running...")
+
+    # 🔥 start deposit checker in background
+    threading.Thread(target=deposit_worker, daemon=True).start()
+
+    offset: Optional[int] = None
+
+    while True:
+        try:
             data = get_updates(offset)
+
             for update in data.get("result", []):
                 offset = update["update_id"] + 1
                 handle_update(update)
 
         except Exception as e:
             print(f"Error: {e}")
-            time.sleep(3)
-
-        time.sleep(10)
+            time.sleep(2)
 
 
 if __name__ == "__main__":
