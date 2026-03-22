@@ -455,10 +455,13 @@ def send_message(
 
 
 def answer_callback(callback_query_id: str, text: str = "") -> None:
-    payload = {"callback_query_id": callback_query_id}
-    if text:
-        payload["text"] = text
-    tg_request("answerCallbackQuery", payload)
+    try:
+        payload = {"callback_query_id": callback_query_id}
+        if text:
+            payload["text"] = text
+        tg_request("answerCallbackQuery", payload)
+    except:
+        pass  # 🔥 prevents crashes
 
 
 def get_updates(offset: Optional[int]) -> Dict[str, Any]:
