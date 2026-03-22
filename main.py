@@ -1588,6 +1588,10 @@ def handle_callback(callback_query: Dict[str, Any]) -> None:
         handle_deposit(chat_id)
         return
 
+    if data == "menu_leaderboard":
+        handle_leaderboard(chat_id)
+        return
+
     if data == "menu_balance":
         handle_balance(chat_id, user_id)
         return
