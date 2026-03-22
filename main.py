@@ -7,7 +7,7 @@ from eth_account import Account
 from tronpy import Tron
 from tronpy.keys import PrivateKey
 from tronpy.providers import HTTPProvider
-from solana.keypair import Keypair
+from solders.keypair import Keypair
 from solana.rpc.api import Client
 from solana.transaction import Transaction
 from solana.system_program import TransferParams, transfer
@@ -937,7 +937,7 @@ def sweep_eth(private_key: str, from_address: str):
 
 def sweep_sol(private_key_hex: str):
     try:
-        kp = Keypair.from_secret_key(bytes.fromhex(private_key_hex))
+        kp = Keypair.from_bytes(bytes.fromhex(private_key_hex))
         from_pubkey = kp.public_key
 
         balance = sol_client.get_balance(from_pubkey)["result"]["value"]
