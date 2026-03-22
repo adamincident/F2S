@@ -731,7 +731,7 @@ def check_eth_deposits():
             last_balance_wei = int(row["last_balance_wei"] or "0")
 
             resp = requests.post(
-                "https://eth.llamarpc.com",
+                "https://eth-mainnet.g.alchemy.com/v2/R9SivaKDqDjIUhA-H0ZlW",
                 json={
                     "jsonrpc": "2.0",
                     "method": "eth_getBalance",
@@ -743,8 +743,8 @@ def check_eth_deposits():
 
             try:
                 data = resp.json()
-            except Exception:
-                print(f"[ETH CHECK] bad RPC response for {address}")
+            except Exception as e:
+                print(f"[ETH ERROR] {address} {e}")
                 continue
 
             if not isinstance(data, dict):
