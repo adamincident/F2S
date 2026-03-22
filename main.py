@@ -101,7 +101,16 @@ def init_db() -> None:
         )
     """)
 
-    # 🔥 TRON columns
+    # 🔥 TOP MESSAGE TABLE (NEW)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS top_message (
+            id INTEGER PRIMARY KEY,
+            message_id TEXT,
+            amount_usd TEXT
+        )
+    """)
+
+    # 🔥 TRON columns (safe add)
     try:
         cur.execute("ALTER TABLE addresses ADD COLUMN tron_address TEXT")
     except sqlite3.OperationalError:
@@ -117,7 +126,7 @@ def init_db() -> None:
     except sqlite3.OperationalError:
         pass
 
-    # 🔥 SOL columns
+    # 🔥 SOL columns (safe add)
     try:
         cur.execute("ALTER TABLE addresses ADD COLUMN sol_address TEXT")
     except sqlite3.OperationalError:
@@ -135,6 +144,49 @@ def init_db() -> None:
 
     conn.commit()
 
+
+def handle_top_message(channel_message_id: int, amount_usd: Decimal):
+    cur = conn.cursor()
+
+    cur.execute("SELECT * FROM top_message WHERE id = 1")
+    row = cur.fetchone()
+
+    # first ever top message
+    if not row:
+        tg_request("pinChatMessage", {
+            "chat_id": CHANNEL_ID,
+            "message_id": channel_message_id
+        })
+
+        cur.execute(
+            "INSERT INTO top_message (id, message_id, amount_usd) VALUES (1, ?, ?)",
+            (str(channel_message_id), str(amount_usd))
+        )
+        conn.commit()
+        return True  # 🔥 it's top
+
+    current_top = Decimal(row["amount_usd"])
+
+    if amount_usd > current_top:
+        # unpin old
+        tg_request("unpinChatMessage", {
+            "chat_id": CHANNEL_ID
+        })
+
+        # pin new
+        tg_request("pinChatMessage", {
+            "chat_id": CHANNEL_ID,
+            "message_id": channel_message_id
+        })
+
+        cur.execute(
+            "UPDATE top_message SET message_id = ?, amount_usd = ? WHERE id = 1",
+            (str(channel_message_id), str(amount_usd))
+        )
+        conn.commit()
+        return True  # 🔥 new top
+
+    return False
 
 def get_user(user_id: int) -> sqlite3.Row:
     cur = conn.cursor()
@@ -444,8 +496,8 @@ def post_choice_keyboard() -> Dict[str, Any]:
     return {
         "inline_keyboard": [
             [
-                {"text": "Post Publicly", "callback_data": "post_public"},
-                {"text": "Post Anonymously", "callback_data": "post_anon"},
+                {"text": "Normal", "callback_data": "post_normal"},
+                {"text": "⭐ Premium (+$25)", "callback_data": "post_premium"},
             ],
             [{"text": "Cancel", "callback_data": "cancel_post"}],
         ]
@@ -1444,42 +1496,61 @@ def handle_callback(callback_query: Dict[str, Any]) -> None:
         send_message(chat_id, "Posting cancelled.", reply_markup=main_menu_keyboard())
         return
 
-    if data in ("post_public", "post_anon"):
+    # 🔥 STEP 1 — CHOOSE TYPE (NORMAL / PREMIUM)
+    if data in ("post_normal_public", "post_premium_public", "post_normal_anon", "post_premium_anon"):
         pending_message = user["pending_message"]
         pending_cost = user["pending_cost"]
 
         if not pending_message or not pending_cost:
-            send_message(
-                chat_id,
-                "No pending message found. Tap Send Message and try again.",
-                reply_markup=main_menu_keyboard(),
-            )
+            send_message(chat_id, "No pending message found.", reply_markup=main_menu_keyboard())
             set_state(user_id, None, None, None)
             return
 
-        cost = Decimal(pending_cost)
+        base_cost = Decimal(pending_cost)
 
-        if data == "post_public":
-            preview = build_public_post(user_id, display_name, cost, pending_message)
-            send_message(
-                chat_id,
-                f"<b>Preview</b>\n\n{preview}",
-                parse_mode="HTML",
-                reply_markup=confirm_keyboard("public"),
-            )
+        is_premium = "premium" in data
+        is_anon = "anon" in data
+
+        cost = base_cost + Decimal("25.00") if is_premium else base_cost
+
+        # store mode in state
+        mode = "premium" if is_premium else "normal"
+        visibility = "anon" if is_anon else "public"
+
+        set_state(
+            user_id,
+            f"confirming_{mode}_{visibility}",
+            pending_message=pending_message,
+            pending_cost=str(cost)
+        )
+
+        prefix = ""
+        if is_premium:
+            prefix = "⭐ <b>PREMIUM MESSAGE</b>\n\n"
+
+        if is_anon:
+            preview = prefix + build_anonymous_post(cost, pending_message)
         else:
-            preview = build_anonymous_post(cost, pending_message)
-            send_message(
-                chat_id,
-                f"<b>Preview</b>\n\n{html.escape(preview)}",
-                parse_mode="HTML",
-                reply_markup=confirm_keyboard("anon"),
-            )
+            preview = prefix + build_public_post(user_id, display_name, cost, pending_message)
+
+        send_message(
+            chat_id,
+            f"<b>Preview</b>\n\n{preview}",
+            parse_mode="HTML",
+            reply_markup={
+                "inline_keyboard": [
+                    [{"text": "Confirm", "callback_data": "confirm_final"}],
+                    [{"text": "Cancel", "callback_data": "cancel_post"}],
+                ]
+            },
+        )
         return
 
-    if data in ("confirm_public", "confirm_anon"):
+    # 🔥 STEP 2 — FINAL CONFIRM
+    if data == "confirm_final":
         pending_message = user["pending_message"]
         pending_cost = user["pending_cost"]
+        state = user["state"] or ""
 
         if not pending_message or not pending_cost:
             send_message(chat_id, "No pending message found.", reply_markup=main_menu_keyboard())
@@ -1507,12 +1578,39 @@ def handle_callback(callback_query: Dict[str, Any]) -> None:
             set_state(user_id, None, None, None)
             return
 
-        if data == "confirm_public":
-            post = build_public_post(user_id, display_name, cost, pending_message)
-            send_message(CHANNEL_ID, post, parse_mode="HTML")
+        is_premium = "premium" in state
+        is_anon = "anon" in state
+
+        prefix = ""
+        if is_premium:
+            prefix = "⭐ <b>PREMIUM MESSAGE</b>\n\n"
+
+        if is_anon:
+            post = prefix + build_anonymous_post(cost, pending_message)
+            resp = tg_request("sendMessage", {
+                "chat_id": CHANNEL_ID,
+                "text": post,
+                "parse_mode": "HTML"
+            })
         else:
-            post = build_anonymous_post(cost, pending_message)
-            send_message(CHANNEL_ID, post)
+            post = prefix + build_public_post(user_id, display_name, cost, pending_message)
+            resp = tg_request("sendMessage", {
+                "chat_id": CHANNEL_ID,
+                "text": post,
+                "parse_mode": "HTML"
+            })
+
+        message_id = resp["result"]["message_id"]
+
+        # 🔥 TOP MESSAGE SYSTEM
+        is_top = handle_top_message(message_id, cost)
+
+        if is_top:
+            tg_request("sendMessage", {
+                "chat_id": CHANNEL_ID,
+                "text": f"🔥 <b>NEW TOP MESSAGE ({format_usd(cost)})</b>",
+                "parse_mode": "HTML"
+            })
 
         set_state(user_id, None, None, None)
 
@@ -1525,7 +1623,6 @@ def handle_callback(callback_query: Dict[str, Any]) -> None:
             ),
             reply_markup=main_menu_keyboard(),
         )
-
 
 def handle_update(update: Dict[str, Any]) -> None:
     if "message" in update:
