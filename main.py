@@ -417,16 +417,28 @@ def main_menu_keyboard() -> Dict[str, Any]:
     }
 
 def deposit_keyboard() -> Dict[str, Any]:
-    rows = []
-    coins = list(WALLETS.keys())
-    for i in range(0, len(coins), 2):
-        row = [{"text": coins[i], "callback_data": f"deposit_{coins[i]}"}]
-        if i + 1 < len(coins):
-            row.append({"text": coins[i + 1], "callback_data": f"deposit_{coins[i + 1]}"})
-        rows.append(row)
-    rows.append([{"text": "Back", "callback_data": "menu_home"}])
-    return {"inline_keyboard": rows}
-
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "ETH", "callback_data": "deposit_ETH"},
+                {"text": "TRON", "callback_data": "deposit_TRON"},
+            ],
+            [
+                {"text": "SOL", "callback_data": "deposit_SOL"},
+                {"text": "BTC (soon)", "callback_data": "soon_BTC"},
+            ],
+            [
+                {"text": "LTC (soon)", "callback_data": "soon_LTC"},
+                {"text": "XRP (soon)", "callback_data": "soon_XRP"},
+            ],
+            [
+                {"text": "TON (soon)", "callback_data": "soon_TON"},
+            ],
+            [
+                {"text": "Back", "callback_data": "menu_home"}
+            ],
+        ]
+    }
 
 def post_choice_keyboard() -> Dict[str, Any]:
     return {
@@ -1388,24 +1400,40 @@ def handle_callback(callback_query: Dict[str, Any]) -> None:
     update_user_profile(user_id, username, first_name)
     answer_callback(callback_id)
 
+    # 🔥 COMING SOON HANDLER
+    if data.startswith("soon_"):
+        coin = data.split("_")[1]
+        send_message(
+            chat_id,
+            f"🚧 {coin} deposits are coming soon.\n\n"
+            "For now, use ETH, TRON, or SOL.",
+            reply_markup=deposit_keyboard(),
+        )
+        return
+
     if data == "menu_home":
         handle_start(chat_id, user_id)
         return
+
     if data == "menu_deposit":
         handle_deposit(chat_id)
         return
+
     if data == "menu_balance":
         handle_balance(chat_id, user_id)
         return
+
     if data == "menu_send":
         handle_send_begin(chat_id, user_id)
         return
+
     if data == "menu_help":
         handle_help(chat_id)
         return
+
     if data.startswith("deposit_"):
         coin = data.split("_", 1)[1]
-        if coin in WALLETS:
+        if coin in ["ETH", "TRON", "SOL"]:
             handle_show_coin(chat_id, coin, user_id)
         return
 
@@ -1419,6 +1447,7 @@ def handle_callback(callback_query: Dict[str, Any]) -> None:
     if data in ("post_public", "post_anon"):
         pending_message = user["pending_message"]
         pending_cost = user["pending_cost"]
+
         if not pending_message or not pending_cost:
             send_message(
                 chat_id,
@@ -1429,6 +1458,7 @@ def handle_callback(callback_query: Dict[str, Any]) -> None:
             return
 
         cost = Decimal(pending_cost)
+
         if data == "post_public":
             preview = build_public_post(user_id, display_name, cost, pending_message)
             send_message(
@@ -1450,6 +1480,7 @@ def handle_callback(callback_query: Dict[str, Any]) -> None:
     if data in ("confirm_public", "confirm_anon"):
         pending_message = user["pending_message"]
         pending_cost = user["pending_cost"]
+
         if not pending_message or not pending_cost:
             send_message(chat_id, "No pending message found.", reply_markup=main_menu_keyboard())
             set_state(user_id, None, None, None)
@@ -1466,6 +1497,7 @@ def handle_callback(callback_query: Dict[str, Any]) -> None:
 
         cost = Decimal(pending_cost)
         ok, new_balance = deduct_balance(user_id, cost)
+
         if not ok:
             send_message(
                 chat_id,
@@ -1483,6 +1515,7 @@ def handle_callback(callback_query: Dict[str, Any]) -> None:
             send_message(CHANNEL_ID, post)
 
         set_state(user_id, None, None, None)
+
         send_message(
             chat_id,
             (
