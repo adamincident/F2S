@@ -141,6 +141,12 @@ def init_db() -> None:
     except:
         pass
 
+    # 🔥 total spent column
+    try:
+        cur.execute("ALTER TABLE users ADD COLUMN total_spent_usd TEXT NOT NULL DEFAULT '0.00'")
+    except sqlite3.OperationalError:
+        pass
+    
     conn.commit()
 
 
@@ -1306,11 +1312,10 @@ def handle_leaderboard(chat_id: int) -> None:
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT u.user_id, u.username, u.first_name, SUM(c.amount_usd) as total
-        FROM claims c
-        JOIN users u ON u.user_id = c.claimed_by
-        GROUP BY c.claimed_by
-        ORDER BY total DESC
+        SELECT user_id, username, first_name, total_spent_usd
+        FROM users
+        WHERE CAST(total_spent_usd AS REAL) > 0
+        ORDER BY CAST(total_spent_usd AS REAL) DESC
         LIMIT 10
     """)
     rows = cur.fetchall()
@@ -1319,15 +1324,15 @@ def handle_leaderboard(chat_id: int) -> None:
         send_message(chat_id, "No leaderboard data yet.")
         return
 
-    text = "🏆 <b>Top Senders</b>\n\n"
+    text = "🏆 <b>Top Spenders</b>\n\n"
 
     for i, row in enumerate(rows, start=1):
         user_id = row["user_id"]
         username = row["username"]
         first_name = row["first_name"] or "User"
-        total = Decimal(row["total"] or "0")
+        total = Decimal(row["total_spent_usd"] or "0")
 
-        # 🔥 clickable username logic
+        # 🔥 clickable username
         if username:
             name = f"@{username}"
         else:
@@ -1335,7 +1340,7 @@ def handle_leaderboard(chat_id: int) -> None:
 
         text += f"{i}. {name} — {format_usd(total)}\n"
 
-    text += "\n🔥 Want to be #1? Send a message."
+    text += "\n🔥 Want to be #1? Spend more."
 
     send_message(chat_id, text, parse_mode="HTML")
 
@@ -1617,13 +1622,12 @@ def handle_callback(callback_query: Dict[str, Any]) -> None:
     update_user_profile(user_id, username, first_name)
     answer_callback(callback_id)
 
-    # 🔥 COMING SOON HANDLER
+    # 🔥 COMING SOON
     if data.startswith("soon_"):
         coin = data.split("_")[1]
         send_message(
             chat_id,
-            f"🚧 {coin} deposits are coming soon.\n\n"
-            "For now, use ETH, TRON, or SOL.",
+            f"🚧 {coin} deposits are coming soon.\n\nUse ETH, TRON, or SOL for now.",
             reply_markup=deposit_keyboard(),
         )
         return
@@ -1712,7 +1716,7 @@ def handle_callback(callback_query: Dict[str, Any]) -> None:
         )
         return
 
-    # 🔥 STEP 2 — FINAL CONFIRM (FIXED INDENT)
+    # 🔥 STEP 2 — FINAL CONFIRM
     if data == "confirm_final":
         pending_message = user["pending_message"]
         pending_cost = user["pending_cost"]
@@ -1743,6 +1747,15 @@ def handle_callback(callback_query: Dict[str, Any]) -> None:
             )
             set_state(user_id, None, None, None)
             return
+
+        # 🔥 TRACK TOTAL SPENT
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE users
+            SET total_spent_usd = CAST(total_spent_usd AS REAL) + ?
+            WHERE user_id = ?
+        """, (float(cost), user_id))
+        conn.commit()
 
         is_premium = "premium" in state
         is_anon = "anon" in state
