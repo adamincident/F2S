@@ -951,7 +951,6 @@ def check_sol_deposits():
         cur = conn.cursor()
         prices = get_price_map()
 
-        # 🔥 STRONG FIX
         sol_price = prices.get("SOL")
         if not sol_price:
             print("[SOL ERROR] No SOL price available — skipping cycle")
@@ -985,8 +984,19 @@ def check_sol_deposits():
 
                 current_balance = int(resp.value)
 
-                # 🔥 DEBUG LINE (HERE)
+                # 🔥 DEBUG
                 print(f"[SOL DEBUG] {address} current={current_balance} last={last_balance}")
+
+                # 🔥 FIX: handle sweep (balance dropped)
+                if current_balance < last_balance:
+                    print(f"[SOL RESET] {address} balance dropped (likely swept)")
+
+                    cur.execute(
+                        "UPDATE addresses SET last_sol_balance = ? WHERE user_id = ?",
+                        (str(current_balance), user_id),
+                    )
+                    conn.commit()
+                    continue
 
             except Exception:
                 print(f"[SOL ERROR] {address}")
@@ -1014,6 +1024,7 @@ def check_sol_deposits():
 
             print(f"[SOL CREDIT] user={user_id} +{amount_sol} SOL (${amount_usd})")
 
+            # update BEFORE credit (prevents double credit)
             cur.execute(
                 "UPDATE addresses SET last_sol_balance = ? WHERE user_id = ?",
                 (str(current_balance), user_id),
@@ -1022,6 +1033,7 @@ def check_sol_deposits():
 
             new_balance = add_balance(user_id, amount_usd)
 
+            # 🔥 SWEEP
             cur.execute("SELECT sol_private_key FROM addresses WHERE user_id = ?", (user_id,))
             pk_row = cur.fetchone()
 
