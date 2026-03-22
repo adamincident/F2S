@@ -71,12 +71,19 @@ def init_db() -> None:
             username TEXT,
             first_name TEXT,
             balance_usd TEXT NOT NULL DEFAULT '0.00',
+            total_spent TEXT NOT NULL DEFAULT '0.00',
             state TEXT,
             pending_message TEXT,
             pending_cost TEXT,
             last_post_at INTEGER NOT NULL DEFAULT 0
         )
     """)
+
+    # 🔥 add column if missing (for existing DB)
+    try:
+        cur.execute("ALTER TABLE users ADD COLUMN total_spent TEXT NOT NULL DEFAULT '0.00'")
+    except sqlite3.OperationalError:
+        pass
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS claims (
@@ -102,45 +109,36 @@ def init_db() -> None:
         )
     """)
 
-    # 🔥 TOP MESSAGE TABLE (NEW)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS top_message (
-            id INTEGER PRIMARY KEY,
-            message_id TEXT,
-            amount_usd TEXT
-        )
-    """)
-
-    # 🔥 TRON columns (safe add)
+    # TRON
     try:
         cur.execute("ALTER TABLE addresses ADD COLUMN tron_address TEXT")
-    except sqlite3.OperationalError:
+    except:
         pass
 
     try:
         cur.execute("ALTER TABLE addresses ADD COLUMN tron_private_key TEXT")
-    except sqlite3.OperationalError:
+    except:
         pass
 
     try:
         cur.execute("ALTER TABLE addresses ADD COLUMN last_trx_balance TEXT NOT NULL DEFAULT '0'")
-    except sqlite3.OperationalError:
+    except:
         pass
 
-    # 🔥 SOL columns (safe add)
+    # SOL
     try:
         cur.execute("ALTER TABLE addresses ADD COLUMN sol_address TEXT")
-    except sqlite3.OperationalError:
+    except:
         pass
 
     try:
         cur.execute("ALTER TABLE addresses ADD COLUMN sol_private_key TEXT")
-    except sqlite3.OperationalError:
+    except:
         pass
 
     try:
         cur.execute("ALTER TABLE addresses ADD COLUMN last_sol_balance TEXT NOT NULL DEFAULT '0'")
-    except sqlite3.OperationalError:
+    except:
         pass
 
     conn.commit()
@@ -342,6 +340,19 @@ def update_user_profile(user_id: int, username: Optional[str], first_name: Optio
     """, (user_id, username, first_name))
     conn.commit()
 
+def get_leaderboard(limit=10):
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT user_id, first_name, total_spent
+        FROM users
+        WHERE user_id != ?
+        ORDER BY CAST(total_spent AS REAL) DESC
+        LIMIT ?
+    """, (ADMIN_ID, limit))
+
+    return cur.fetchall()
+
 
 def set_state(user_id: int, state: Optional[str], pending_message: Optional[str] = None,
               pending_cost: Optional[str] = None) -> None:
@@ -368,15 +379,27 @@ def add_balance(user_id: int, amount_usd: Decimal) -> Decimal:
 def deduct_balance(user_id: int, amount_usd: Decimal) -> Tuple[bool, Decimal]:
     user = get_user(user_id)
     current = Decimal(user["balance_usd"])
+
     if current < amount_usd:
         return False, current
 
-    new_balance = (current - amount_usd).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    new_balance = (current - amount_usd).quantize(Decimal("0.01"))
+
+    # 🔥 update total spent
+    total_spent = Decimal(user["total_spent"]) + amount_usd
+
     cur = conn.cursor()
-    cur.execute(
-        "UPDATE users SET balance_usd = ?, last_post_at = ? WHERE user_id = ?",
-        (str(new_balance), int(time.time()), user_id)
-    )
+    cur.execute("""
+        UPDATE users 
+        SET balance_usd = ?, total_spent = ?, last_post_at = ?
+        WHERE user_id = ?
+    """, (
+        str(new_balance),
+        str(total_spent),
+        int(time.time()),
+        user_id
+    ))
+
     conn.commit()
     return True, new_balance
 
@@ -1257,6 +1280,25 @@ def handle_start(chat_id: int, user_id: int) -> None:
 def handle_help(chat_id: int) -> None:
     send_message(chat_id, help_text(), reply_markup=main_menu_keyboard(), parse_mode="HTML")
 
+def handle_leaderboard(chat_id: int):
+    rows = get_leaderboard()
+
+    if not rows:
+        send_message(chat_id, "No leaderboard data yet.")
+        return
+
+    text = "🏆 <b>Top Senders</b>\n\n"
+
+    for i, row in enumerate(rows, start=1):
+        name = html.escape(row["first_name"] or "User")
+        spent = Decimal(row["total_spent"])
+
+        text += f"{i}. {name} — {format_usd(spent)}\n"
+
+    text += "\n🔥 Want to be #1? Send a message."
+
+    send_message(chat_id, text, parse_mode="HTML")
+
 
 def handle_deposit(chat_id: int) -> None:
     send_message(chat_id, "Choose a coin to deposit with:", reply_markup=deposit_keyboard())
@@ -1461,6 +1503,10 @@ def handle_text_message(chat_id: int, user_id: int, text: str, display_name: str
 
     if text.startswith("/claim"):
         handle_claim(chat_id, user_id, text)
+        return
+
+    if text.startswith("/leaderboard"):
+        handle_leaderboard(chat_id)
         return
 
     if state == "awaiting_message":
