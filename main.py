@@ -530,26 +530,37 @@ def cost_for_message(message: str) -> Decimal:
 def welcome_text() -> str:
     return (
         "🔥 <b>Fund2Say</b>\n\n"
-        "Turn your balance into messages in the channel.\n\n"
-        f"• Rate: {format_usd(PRICE_PER_CHAR)} per character\n"
-        f"• Minimum: {MIN_CHARS} chars ({format_usd(PRICE_PER_CHAR * MIN_CHARS)})\n"
-        f"• Maximum: {MAX_CHARS} chars\n\n"
-        "👇 Use the buttons below to begin."
+        "Turn your money into messages.\n"
+        "Get seen. Get heard.\n\n"
+        "━━━━━━━━━━━━━━━\n"
+        f"💬 <b>${PRICE_PER_CHAR} per character</b>\n"
+        f"📏 {MIN_CHARS}–{MAX_CHARS} characters\n"
+        "━━━━━━━━━━━━━━━\n\n"
+        "👇 <b>Start below</b>"
     )
 
 
 def help_text() -> str:
     return (
-        "<b>How it works</b>\n\n"
-        "1. Tap <b>Deposit</b>\n"
-        "2. Send crypto\n"
-        "3. Balance updates automatically (ETH)\n"
-        "4. Tap <b>Send Message</b>\n"
-        "5. Confirm and post\n\n"
-        "<b>Notes</b>\n"
-        "• ETH = auto detected\n"
-        "• Others = /claim\n"
-        "• Min 3 characters"
+        "❓ <b>How Fund2Say Works</b>\n\n"
+        "1️⃣ Tap <b>Deposit</b>\n"
+        "2️⃣ Send crypto (ETH, TRON, or SOL)\n"
+        "3️⃣ Your balance updates automatically\n"
+        "4️⃣ Tap <b>Send Message</b>\n"
+        "5️⃣ Choose Normal or ⭐ Premium\n"
+        "6️⃣ Confirm and post to the channel\n\n"
+        "━━━━━━━━━━━━━━━\n"
+        "<b>💡 Tips</b>\n"
+        "• ⭐ Premium messages cost +$25\n"
+        "• 👑 Highest paid message gets pinned\n"
+        "• 🔥 Beat the top message to take the spot\n\n"
+        "━━━━━━━━━━━━━━━\n"
+        "<b>🪙 Supported Coins</b>\n"
+        "• ETH, TRON, SOL (auto detected)\n"
+        "• More coins coming soon\n\n"
+        "━━━━━━━━━━━━━━━\n"
+        "📩 Need help?\n"
+        "Contact @F2SSupport"
     )
 
 
@@ -1328,17 +1339,25 @@ def handle_balance(chat_id: int, user_id: int) -> None:
 def handle_send_begin(chat_id: int, user_id: int) -> None:
     bal = get_balance(user_id)
     minimum_cost = PRICE_PER_CHAR * MIN_CHARS
+
     send_message(
         chat_id,
         (
+            "✍️ <b>Send Message</b>\n\n"
             "Send the message you want posted.\n\n"
             f"• Price: {format_usd(PRICE_PER_CHAR)} per character\n"
             f"• Minimum: {MIN_CHARS} chars ({format_usd(minimum_cost)})\n"
-            f"• Maximum: {MAX_CHARS} chars\n"
-            f"• Your balance: {format_usd(bal)}"
+            f"• Maximum: {MAX_CHARS} chars\n\n"
+            f"💰 Your balance: {format_usd(bal)}"
         ),
-        reply_markup=main_menu_keyboard(),
+        parse_mode="HTML",
+        reply_markup={
+            "inline_keyboard": [
+                [{"text": "⬅️ Back", "callback_data": "menu_home"}]
+            ]
+        }
     )
+
     set_state(user_id, "awaiting_message")
 
 
