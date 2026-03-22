@@ -9,8 +9,6 @@ from tronpy.keys import PrivateKey
 from tronpy.providers import HTTPProvider
 from solders.keypair import Keypair
 from solana.rpc.api import Client
-from solana.transaction import Transaction
-from solana.system_program import TransferParams, transfer
 
 tron = Tron(
     provider=HTTPProvider(
@@ -936,38 +934,9 @@ def sweep_eth(private_key: str, from_address: str):
         print(f"[SWEEP ERROR] {e}")
 
 def sweep_sol(private_key_hex: str):
-    try:
-        kp = Keypair.from_bytes(bytes.fromhex(private_key_hex))
-        from_pubkey = kp.public_key
-
-        balance = sol_client.get_balance(from_pubkey)["result"]["value"]
-
-        if balance <= 0:
-            return
-
-        reserve = int(0.002 * 10**9)  # keep small SOL
-        send_amount = balance - reserve
-
-        if send_amount <= 0:
-            print("[SOL SWEEP] Not enough SOL to sweep")
-            return
-
-        txn = Transaction().add(
-            transfer(
-                TransferParams(
-                    from_pubkey=from_pubkey,
-                    to_pubkey=MAIN_SOL_WALLET,
-                    lamports=send_amount
-                )
-            )
-        )
-
-        sol_client.send_transaction(txn, kp)
-
-        print(f"[SOL SWEEP] Sent {send_amount} lamports")
-
-    except Exception as e:
-        print(f"[SOL SWEEP ERROR] {e}")
+    # 🔥 temporarily disabled (safe)
+    print("[SOL SWEEP] skipped (disabled)")
+    return
 
 def verify_btc_like(tx_hash: str, coin: str, prices: Dict[str, Decimal]) -> Tuple[bool, str, Decimal, Decimal]:
     chain_slug = "bitcoin" if coin == "BTC" else "litecoin"
