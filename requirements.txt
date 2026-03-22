@@ -2,4 +2,5 @@ requests
 eth-account
 web3
 tronpy
+solders
 solana
