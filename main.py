@@ -123,43 +123,44 @@ def get_user(user_id: int) -> sqlite3.Row:
 def get_or_create_eth_address(user_id: int):
     cur = conn.cursor()
 
-    cur.execute("SELECT eth_address FROM addresses WHERE user_id = ?", (user_id,))
+    # Ensure row exists
+    cur.execute("SELECT * FROM addresses WHERE user_id = ?", (user_id,))
     row = cur.fetchone()
 
-    if row and row["eth_address"]:
-        return row["eth_address"]
+    if row:
+        if row["eth_address"]:
+            return row["eth_address"]
+    else:
+        cur.execute("""
+            INSERT INTO addresses (
+                user_id,
+                eth_address,
+                private_key,
+                last_balance_wei,
+                tron_address,
+                tron_private_key,
+                last_trx_balance
+            )
+            VALUES (?, NULL, NULL, '0', NULL, NULL, '0')
+        """, (user_id,))
+        conn.commit()
 
+    # Create new wallet ONLY if missing
     acct = Account.create()
     address = acct.address
     private_key = acct.key.hex()
 
-    cur.execute("SELECT 1 FROM addresses WHERE user_id = ?", (user_id,))
-    existing = cur.fetchone()
-
-    if existing:
-        cur.execute(
-            """
-            UPDATE addresses
-            SET eth_address = ?, private_key = ?, last_balance_wei = '0'
-            WHERE user_id = ?
-            """,
-            (address, private_key, user_id),
-        )
-    else:
-        cur.execute(
-            """
-            INSERT INTO addresses (
-                user_id, eth_address, private_key, last_balance_wei,
-                tron_address, tron_private_key, last_trx_balance
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (user_id, address, private_key, "0", None, None, "0"),
-        )
+    cur.execute("""
+        UPDATE addresses
+        SET eth_address = ?, private_key = ?, last_balance_wei = '0'
+        WHERE user_id = ?
+    """, (address, private_key, user_id))
 
     conn.commit()
-    return address
 
+    print(f"[ETH ADDRESS CREATED] user={user_id} address={address}")
+
+    return address
 
 def get_or_create_tron_address(user_id: int):
     cur = conn.cursor()
@@ -516,6 +517,8 @@ def check_eth_deposits():
         prices = get_price_map()
         eth_price = prices.get("ETH", Decimal("0"))
 
+        MIN_DEPOSIT_USD = Decimal("1.00")
+
         cur.execute("SELECT user_id, eth_address, last_balance_wei FROM addresses")
         rows = cur.fetchall()
 
@@ -560,12 +563,28 @@ def check_eth_deposits():
                 continue
 
             delta_wei = current_balance_wei - last_balance_wei
+            if delta_wei <= 0:
+                continue
+
             amount_eth = Decimal(delta_wei) / Decimal(10**18)
             amount_usd = (amount_eth * eth_price).quantize(
                 Decimal("0.01"),
                 rounding=ROUND_HALF_UP
             )
 
+            # Ignore tiny deposits
+            if amount_usd < MIN_DEPOSIT_USD:
+                print(f"[ETH] Ignored tiny deposit user={user_id} ${amount_usd}")
+                cur.execute(
+                    "UPDATE addresses SET last_balance_wei = ? WHERE user_id = ?",
+                    (str(current_balance_wei), user_id),
+                )
+                conn.commit()
+                continue
+
+            print(f"[ETH CREDIT] user={user_id} +{amount_eth} ETH (${amount_usd})")
+
+            # Update balance FIRST (prevents double credit)
             cur.execute(
                 "UPDATE addresses SET last_balance_wei = ? WHERE user_id = ?",
                 (str(current_balance_wei), user_id),
@@ -574,15 +593,16 @@ def check_eth_deposits():
 
             new_balance = add_balance(user_id, amount_usd)
 
+            # Sweep funds
             cur.execute("SELECT private_key FROM addresses WHERE user_id = ?", (user_id,))
             pk_row = cur.fetchone()
 
             if pk_row and pk_row["private_key"]:
                 try:
                     sweep_eth(pk_row["private_key"], address)
-                    print(f"[ETH SWEEP] success for user {user_id}")
-                except Exception as sweep_error:
-                    print(f"[ETH SWEEP ERROR] {sweep_error}")
+                    print(f"[ETH SWEEP] success user={user_id}")
+                except Exception as e:
+                    print(f"[ETH SWEEP ERROR] {e}")
 
             send_message(
                 user_id,
@@ -716,8 +736,9 @@ def sweep_eth(private_key: str, from_address: str):
         gas_limit = 21000
         fee = gas_price * gas_limit
 
-        if balance <= fee:
-            print(f"[SWEEP] Not enough ETH to cover gas for {from_address}")
+        # Require buffer to avoid failed tx
+        if balance <= fee * 2:
+            print(f"[SWEEP] Not enough ETH to safely sweep from {from_address}")
             return
 
         value = balance - fee
