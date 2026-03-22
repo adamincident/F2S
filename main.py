@@ -38,7 +38,11 @@ WALLETS = {
 ETHERSCAN_API_KEY = "V7AKCX4IDTP6HMD9XYHS52SZM578B4IJF6"
 
 BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
-tron = Tron()
+tron = Tron(
+    provider=Tron.HTTPProvider(
+        api_key="9f159f8f-1cb9-45da-8388-4f93d9a53266"
+    )
+)
 
 # =========================
 # DB
@@ -638,6 +642,8 @@ def check_tron_deposits():
         print(f"[TRON CHECK] scanning {len(rows)} addresses")
 
         for row in rows:
+            time.sleep(0.2)  # 🔥 prevents rate limit (VERY IMPORTANT)
+
             user_id = row["user_id"]
             address = row["tron_address"]
             last_balance_sun = int(row["last_trx_balance"] or "0")
@@ -663,7 +669,6 @@ def check_tron_deposits():
                 rounding=ROUND_HALF_UP
             )
 
-            # Ignore tiny deposits
             if amount_usd < MIN_DEPOSIT_USD:
                 print(f"[TRON] Ignored tiny deposit user={user_id} ${amount_usd}")
                 cur.execute(
@@ -675,7 +680,6 @@ def check_tron_deposits():
 
             print(f"[TRON CREDIT] user={user_id} +{amount_trx} TRX (${amount_usd})")
 
-            # Update FIRST (prevents double credit)
             cur.execute(
                 "UPDATE addresses SET last_trx_balance = ? WHERE user_id = ?",
                 (str(current_balance_sun), user_id),
@@ -684,7 +688,6 @@ def check_tron_deposits():
 
             new_balance = add_balance(user_id, amount_usd)
 
-            # Sweep TRON
             cur.execute("SELECT tron_private_key FROM addresses WHERE user_id = ?", (user_id,))
             pk_row = cur.fetchone()
 
