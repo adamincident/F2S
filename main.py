@@ -428,11 +428,19 @@ def save_claim(coin: str, tx_hash: str, amount_coin: Decimal, amount_usd: Decima
 # TELEGRAM HELPERS
 # =========================
 def tg_request(method: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    resp = requests.post(f"{BASE_URL}/{method}", json=payload, timeout=30)
-    data = resp.json()
-    if not data.get("ok"):
-        raise RuntimeError(f"Telegram API error in {method}: {data}")
-    return data
+    try:
+        resp = requests.post(f"{BASE_URL}/{method}", json=payload, timeout=30)
+        data = resp.json()
+
+        if not data.get("ok"):
+            print(f"[TG ERROR] {method}: {data}")
+            return {}
+
+        return data
+
+    except Exception as e:
+        print(f"[TG REQUEST ERROR] {e}")
+        return {}
 
 
 def send_message(
@@ -756,9 +764,15 @@ def check_eth_deposits():
                 rounding=ROUND_HALF_UP
             )
 
-            # Ignore tiny deposits
+            # 🔥 FIXED INDENTATION
             if amount_usd < MIN_DEPOSIT_USD:
-                print(f"[ETH] Ignored tiny deposit user={user_id} ${amount_usd}")
+                print(f"[IGNORED SMALL DEPOSIT] user={user_id} ${amount_usd}")
+
+                send_message(
+                    user_id,
+                    "⚠️ Minimum deposit is $1. Smaller deposits are ignored.",
+                )
+
                 cur.execute(
                     "UPDATE addresses SET last_balance_wei = ? WHERE user_id = ?",
                     (str(current_balance_wei), user_id),
@@ -768,7 +782,6 @@ def check_eth_deposits():
 
             print(f"[ETH CREDIT] user={user_id} +{amount_eth} ETH (${amount_usd})")
 
-            # Update balance FIRST (prevents double credit)
             cur.execute(
                 "UPDATE addresses SET last_balance_wei = ? WHERE user_id = ?",
                 (str(current_balance_wei), user_id),
@@ -777,7 +790,6 @@ def check_eth_deposits():
 
             new_balance = add_balance(user_id, amount_usd)
 
-            # Sweep funds
             cur.execute("SELECT private_key FROM addresses WHERE user_id = ?", (user_id,))
             pk_row = cur.fetchone()
 
@@ -820,7 +832,7 @@ def check_tron_deposits():
         print(f"[TRON CHECK] scanning {len(rows)} addresses")
 
         for row in rows:
-            time.sleep(0.2)  # 🔥 prevents rate limiting
+            time.sleep(0.2)  # prevent rate limits
 
             user_id = row["user_id"]
             address = row["tron_address"]
@@ -830,11 +842,13 @@ def check_tron_deposits():
                 current_balance_trx = tron.get_account_balance(address)
             except Exception as e:
                 if "account not found" in str(e).lower():
-                    continue  # 🔥 normal → skip silently
+                    continue
                 print(f"[TRON ERROR] {address} {e}")
                 continue
 
-            current_balance_sun = int(Decimal(str(current_balance_trx)) * Decimal("1000000"))
+            current_balance_sun = int(
+                Decimal(str(current_balance_trx)) * Decimal("1000000")
+            )
 
             if current_balance_sun <= last_balance_sun:
                 continue
@@ -849,7 +863,15 @@ def check_tron_deposits():
                 rounding=ROUND_HALF_UP
             )
 
+            # 🔥 SMALL DEPOSIT HANDLING (FIXED)
             if amount_usd < MIN_DEPOSIT_USD:
+                print(f"[IGNORED SMALL DEPOSIT] user={user_id} ${amount_usd}")
+
+                send_message(
+                    user_id,
+                    "⚠️ Minimum deposit is $1. Smaller deposits are ignored.",
+                )
+
                 cur.execute(
                     "UPDATE addresses SET last_trx_balance = ? WHERE user_id = ?",
                     (str(current_balance_sun), user_id),
@@ -859,6 +881,7 @@ def check_tron_deposits():
 
             print(f"[TRON CREDIT] user={user_id} +{amount_trx} TRX (${amount_usd})")
 
+            # update balance FIRST
             cur.execute(
                 "UPDATE addresses SET last_trx_balance = ? WHERE user_id = ?",
                 (str(current_balance_sun), user_id),
@@ -867,7 +890,11 @@ def check_tron_deposits():
 
             new_balance = add_balance(user_id, amount_usd)
 
-            cur.execute("SELECT tron_private_key FROM addresses WHERE user_id = ?", (user_id,))
+            # 🔥 SWEEP
+            cur.execute(
+                "SELECT tron_private_key FROM addresses WHERE user_id = ?",
+                (user_id,)
+            )
             pk_row = cur.fetchone()
 
             if pk_row and pk_row["tron_private_key"]:
@@ -877,6 +904,7 @@ def check_tron_deposits():
                 except Exception as e:
                     print(f"[TRON SWEEP ERROR] {e}")
 
+            # 🔥 NOTIFY USER
             send_message(
                 user_id,
                 (
@@ -890,34 +918,6 @@ def check_tron_deposits():
 
     except Exception as e:
         print(f"TRON check error: {e}")
-def sweep_tron(private_key_hex: str):
-    try:
-        pk = PrivateKey(bytes.fromhex(private_key_hex))
-        owner = pk.public_key.to_base58check_address()
-
-        balance_trx = tron.get_account_balance(owner)
-        if balance_trx <= Decimal("0"):
-            return
-
-        reserve = Decimal("1")
-        send_amount = Decimal(str(balance_trx)) - reserve
-
-        if send_amount <= Decimal("0"):
-            print(f"[TRON SWEEP] Not enough TRX to sweep from {owner}")
-            return
-
-        txn = (
-            tron.trx.transfer(owner, MAIN_TRON_WALLET, int(send_amount * Decimal("1000000")))
-            .memo("Fund2Say sweep")
-            .build()
-            .sign(pk)
-        )
-        result = txn.broadcast()
-
-        print(f"[TRON SWEEP] {owner} -> {MAIN_TRON_WALLET} | result={result}")
-
-    except Exception as e:
-        print(f"[TRON SWEEP ERROR] {e}")
 
 def check_sol_deposits():
     try:
@@ -947,8 +947,8 @@ def check_sol_deposits():
                 pubkey = Pubkey.from_string(address)
                 resp = sol_client.get_balance(pubkey)
                 current_balance = resp.value
-            except Exception:
-                print(f"[SOL ERROR] {address}")
+            except Exception as e:
+                print(f"[SOL ERROR] {address} {e}")
                 continue
 
             if current_balance <= last_balance:
@@ -959,9 +959,20 @@ def check_sol_deposits():
                 continue
 
             amount_sol = Decimal(delta) / Decimal(10**9)
-            amount_usd = (amount_sol * sol_price).quantize(Decimal("0.01"))
+            amount_usd = (amount_sol * sol_price).quantize(
+                Decimal("0.01"),
+                rounding=ROUND_HALF_UP
+            )
 
+            # 🔥 SMALL DEPOSIT HANDLING (FIXED)
             if amount_usd < MIN_DEPOSIT_USD:
+                print(f"[IGNORED SMALL DEPOSIT] user={user_id} ${amount_usd}")
+
+                send_message(
+                    user_id,
+                    "⚠️ Minimum deposit is $1. Smaller deposits are ignored.",
+                )
+
                 cur.execute(
                     "UPDATE addresses SET last_sol_balance = ? WHERE user_id = ?",
                     (str(current_balance), user_id),
@@ -971,6 +982,7 @@ def check_sol_deposits():
 
             print(f"[SOL CREDIT] user={user_id} +{amount_sol} SOL (${amount_usd})")
 
+            # update balance FIRST
             cur.execute(
                 "UPDATE addresses SET last_sol_balance = ? WHERE user_id = ?",
                 (str(current_balance), user_id),
@@ -979,7 +991,11 @@ def check_sol_deposits():
 
             new_balance = add_balance(user_id, amount_usd)
 
-            cur.execute("SELECT sol_private_key FROM addresses WHERE user_id = ?", (user_id,))
+            # 🔥 SWEEP (if enabled)
+            cur.execute(
+                "SELECT sol_private_key FROM addresses WHERE user_id = ?",
+                (user_id,)
+            )
             pk_row = cur.fetchone()
 
             if pk_row and pk_row["sol_private_key"]:
@@ -989,6 +1005,7 @@ def check_sol_deposits():
                 except Exception as e:
                     print(f"[SOL SWEEP ERROR] {e}")
 
+            # 🔥 NOTIFY USER
             send_message(
                 user_id,
                 (
@@ -1518,6 +1535,11 @@ def handle_text_message(chat_id: int, user_id: int, text: str, display_name: str
         message = text.strip()
         char_count = len(message)
 
+        # 🔥 ALLOW TELEGRAM LINKS ONLY
+        if "http" in message.lower() and "t.me" not in message.lower():
+            send_message(chat_id, "🚫 Only Telegram links are allowed.")
+            return
+
         if char_count < MIN_CHARS:
             send_message(chat_id, f"Your message is too short. Minimum is {MIN_CHARS} characters.")
             return
@@ -1529,21 +1551,28 @@ def handle_text_message(chat_id: int, user_id: int, text: str, display_name: str
         cost = cost_for_message(message)
         balance = get_balance(user_id)
 
+        # 🔥 STEP 6 — CONVERSION BOOST
         if balance < cost:
             send_message(
                 chat_id,
                 (
                     f"❌ Not enough balance.\n\n"
-                    f"Message length: {char_count} characters\n"
                     f"Cost: {format_usd(cost)}\n"
-                    f"Your balance: {format_usd(balance)}"
+                    f"Your balance: {format_usd(balance)}\n\n"
+                    "💳 Deposit to continue → Tap below"
                 ),
-                reply_markup=main_menu_keyboard(),
+                reply_markup={
+                    "inline_keyboard": [
+                        [{"text": "💳 Deposit", "callback_data": "menu_deposit"}],
+                        [{"text": "⬅️ Back", "callback_data": "menu_home"}],
+                    ]
+                },
             )
             set_state(user_id, None, None, None)
             return
 
         set_state(user_id, "awaiting_post_mode", pending_message=message, pending_cost=str(cost))
+
         send_message(
             chat_id,
             (
@@ -1670,63 +1699,63 @@ def handle_callback(callback_query: Dict[str, Any]) -> None:
         )
         return
 
-    # 🔥 STEP 2 — FINAL CONFIRM
-    if data == "confirm_final":
-        pending_message = user["pending_message"]
-        pending_cost = user["pending_cost"]
-        state = user["state"] or ""
+# 🔥 STEP 2 — FINAL CONFIRM
+if data == "confirm_final":
+    pending_message = user["pending_message"]
+    pending_cost = user["pending_cost"]
+    state = user["state"] or ""
 
-        if not pending_message or not pending_cost:
-            send_message(chat_id, "No pending message found.", reply_markup=main_menu_keyboard())
-            set_state(user_id, None, None, None)
-            return
+    if not pending_message or not pending_cost:
+        send_message(chat_id, "No pending message found.", reply_markup=main_menu_keyboard())
+        set_state(user_id, None, None, None)
+        return
 
-        allowed, remaining = can_post_now(user_id)
-        if not allowed:
-            send_message(
-                chat_id,
-                f"Please wait {remaining} seconds before posting again.",
-                reply_markup=main_menu_keyboard(),
-            )
-            return
+    allowed, remaining = can_post_now(user_id)
+    if not allowed:
+        send_message(
+            chat_id,
+            f"⏳ Slow down — wait {remaining} seconds before posting again.",
+            reply_markup=main_menu_keyboard(),
+        )
+        return
 
-        cost = Decimal(pending_cost)
-        ok, new_balance = deduct_balance(user_id, cost)
+    cost = Decimal(pending_cost)
+    ok, new_balance = deduct_balance(user_id, cost)
 
-        if not ok:
-            send_message(
-                chat_id,
-                "Your balance is no longer enough for this post.",
-                reply_markup=main_menu_keyboard(),
-            )
-            set_state(user_id, None, None, None)
-            return
+    if not ok:
+        send_message(
+            chat_id,
+            "❌ Your balance is no longer enough for this post.",
+            reply_markup=main_menu_keyboard(),
+        )
+        set_state(user_id, None, None, None)
+        return
 
-        is_premium = "premium" in state
-        is_anon = "anon" in state
+    # 🔥 detect premium
+    is_premium = "premium" in state
 
-        prefix = ""
-        if is_premium:
-            prefix = "⭐ <b>PREMIUM MESSAGE</b>\n\n"
+    label = ""
+    if is_premium:
+        label = "⭐ <b>PREMIUM MESSAGE</b>\n\n"
 
-        if is_anon:
-            post = prefix + build_anonymous_post(cost, pending_message)
-            resp = tg_request("sendMessage", {
-                "chat_id": CHANNEL_ID,
-                "text": post,
-                "parse_mode": "HTML"
-            })
-        else:
-            post = prefix + build_public_post(user_id, display_name, cost, pending_message)
-            resp = tg_request("sendMessage", {
-                "chat_id": CHANNEL_ID,
-                "text": post,
-                "parse_mode": "HTML"
-            })
+    post = label + build_public_post(user_id, display_name, cost, pending_message)
 
-        message_id = resp["result"]["message_id"]
+    # 🔥 send message
+    resp = tg_request("sendMessage", {
+        "chat_id": CHANNEL_ID,
+        "text": post,
+        "parse_mode": "HTML"
+    })
 
-        # 🔥 TOP MESSAGE SYSTEM
+    print(f"[POST] user={user_id} cost={cost}")
+
+    message_id = resp.get("result", {}).get("message_id")
+
+    # 🔥 analytics
+    print(f"[POST] user={user_id} cost={cost} premium={is_premium}")
+
+    # 🔥 TOP MESSAGE SYSTEM
+    if message_id:
         is_top = handle_top_message(message_id, cost)
 
         if is_top:
@@ -1736,17 +1765,18 @@ def handle_callback(callback_query: Dict[str, Any]) -> None:
                 "parse_mode": "HTML"
             })
 
-        set_state(user_id, None, None, None)
+    set_state(user_id, None, None, None)
 
-        send_message(
-            chat_id,
-            (
-                f"✅ Message posted\n"
-                f"Charged: {format_usd(cost)}\n"
-                f"Remaining balance: {format_usd(new_balance)}"
-            ),
-            reply_markup=main_menu_keyboard(),
-        )
+    send_message(
+        chat_id,
+        (
+            f"✅ Message posted\n"
+            f"Charged: {format_usd(cost)}\n"
+            f"Remaining balance: {format_usd(new_balance)}\n\n"
+            "🔥 Want more attention? Send another one."
+        ),
+        reply_markup=main_menu_keyboard(),
+    )
 
 def handle_update(update: Dict[str, Any]) -> None:
     if "message" in update:
