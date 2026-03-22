@@ -27,6 +27,7 @@ import requests
 # =========================
 BOT_TOKEN = "8709397983:AAGN-NhPOlSZUgRgAX_mqO3X9Zj7AaXiYKo"
 CHANNEL_ID = "-1003764332533"
+ADMIN_ID = 7600140929
 
 MAIN_ETH_WALLET = "0x0eAd9196934aA92d24B16060E78D644d4198606e"
 MAIN_TRON_WALLET = "TEoPpnymKPkf7BKpnASM8QNPa5bETzKX25"
@@ -1245,6 +1246,31 @@ def handle_help(chat_id: int) -> None:
 def handle_deposit(chat_id: int) -> None:
     send_message(chat_id, "Choose a coin to deposit with:", reply_markup=deposit_keyboard())
 
+def handle_admin_add_balance(chat_id: int, user_id: int, text: str):
+    if user_id != ADMIN_ID:
+        send_message(chat_id, "❌ Unauthorized.")
+        return
+
+    parts = text.strip().split()
+
+    if len(parts) != 3:
+        send_message(chat_id, "Usage:\n/addbalance USER_ID AMOUNT")
+        return
+
+    try:
+        target_user = int(parts[1])
+        amount = Decimal(parts[2])
+    except:
+        send_message(chat_id, "Invalid format.")
+        return
+
+    new_balance = add_balance(target_user, amount)
+
+    send_message(
+        chat_id,
+        f"✅ Added {format_usd(amount)} to user {target_user}\nNew balance: {format_usd(new_balance)}"
+    )
+
 
 def handle_show_coin(chat_id: int, coin: str, user_id: int) -> None:
     if coin == "ETH":
@@ -1388,6 +1414,10 @@ def handle_text_message(chat_id: int, user_id: int, text: str, display_name: str
 
     if text.startswith("/send"):
         handle_send_begin(chat_id, user_id)
+        return
+
+    if text.startswith("/addbalance"):
+        handle_admin_add_balance(chat_id, user_id, text)
         return
 
     if text.startswith("/claim"):
