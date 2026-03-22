@@ -14,6 +14,8 @@ from solders.message import Message
 from solders.system_program import TransferParams, transfer
 from solders.transaction import Transaction
 
+PRICE_CACHE = {}
+
 tron = Tron(
     provider=HTTPProvider(
         api_key="9f159f8f-1cb9-45da-8388-4f93d9a53266"
@@ -610,6 +612,8 @@ def help_text() -> str:
 # CHAIN VERIFICATION
 # =========================
 def get_price_map() -> Dict[str, Decimal]:
+    global PRICE_CACHE
+
     try:
         resp = requests.get(
             "https://api.coingecko.com/api/v3/simple/price",
@@ -633,18 +637,27 @@ def get_price_map() -> Dict[str, Decimal]:
         if "solana" in data:
             prices["SOL"] = Decimal(str(data["solana"]["usd"]))
 
-        if not prices:
-            raise Exception("No prices returned")
+        if prices:
+            PRICE_CACHE = prices  # 🔥 save last good prices
+            return prices
 
-        return prices
+        raise Exception("No valid prices")
 
     except Exception as e:
-        print(f"[PRICE ERROR] using fallback prices: {e}")
+        print(f"[PRICE ERROR] {e}")
+
+        # 🔥 USE CACHE FIRST
+        if PRICE_CACHE:
+            print("[PRICE] using cached prices")
+            return PRICE_CACHE
+
+        # 🔥 LAST RESORT FALLBACK (safe values)
+        print("[PRICE] using fallback prices")
 
         return {
-            "ETH": Decimal("3500"),
-            "TRON": Decimal("0.13"),
-            "SOL": Decimal("200"),
+            "ETH": Decimal("1900"),
+            "TRON": Decimal("0.28"),
+            "SOL": Decimal("75"),
         }
 
 def verify_eth(tx_hash: str, prices: Dict[str, Decimal]):
