@@ -834,7 +834,8 @@ def check_sol_deposits():
 
             try:
                 pubkey = Pubkey.from_string(address)
-                current_balance = sol_client.get_balance(pubkey)["result"]["value"]
+                resp = sol_client.get_balance(pubkey)
+                current_balance = resp.value
             except Exception:
                 print(f"[SOL ERROR] {address}")
                 continue
