@@ -7,6 +7,10 @@ from eth_account import Account
 from tronpy import Tron
 from tronpy.keys import PrivateKey
 from tronpy.providers import HTTPProvider
+from solana.keypair import Keypair
+from solana.rpc.api import Client
+from solana.transaction import Transaction
+from solana.system_program import TransferParams, transfer
 
 tron = Tron(
     provider=HTTPProvider(
@@ -24,6 +28,8 @@ CHANNEL_ID = "-1003764332533"
 
 MAIN_ETH_WALLET = "0x0eAd9196934aA92d24B16060E78D644d4198606e"
 MAIN_TRON_WALLET = "TEoPpnymKPkf7BKpnASM8QNPa5bETzKX25"
+MAIN_SOL_WALLET = "4mPV1NH2f7ka6W4pAi8ThKy6ks7kY4aepXKQdEiZVJcm"
+sol_client = Client("https://api.mainnet-beta.solana.com")
 
 PRICE_PER_CHAR = Decimal("0.35")
 MIN_CHARS = 3
@@ -82,16 +88,16 @@ def init_db() -> None:
     """)
 
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS addresses (
-        user_id INTEGER PRIMARY KEY,
-        eth_address TEXT,
-        private_key TEXT,
-        last_balance_wei TEXT NOT NULL DEFAULT '0',
-        tron_address TEXT,
-        tron_private_key TEXT,
-        last_trx_balance TEXT NOT NULL DEFAULT '0'
-    )
-""")
+        CREATE TABLE IF NOT EXISTS addresses (
+            user_id INTEGER PRIMARY KEY,
+            eth_address TEXT,
+            private_key TEXT,
+            last_balance_wei TEXT NOT NULL DEFAULT '0',
+            tron_address TEXT,
+            tron_private_key TEXT,
+            last_trx_balance TEXT NOT NULL DEFAULT '0'
+        )
+    """)
 
     # 🔥 TRON columns
     try:
@@ -106,6 +112,22 @@ def init_db() -> None:
 
     try:
         cur.execute("ALTER TABLE addresses ADD COLUMN last_trx_balance TEXT NOT NULL DEFAULT '0'")
+    except sqlite3.OperationalError:
+        pass
+
+    # 🔥 SOL columns
+    try:
+        cur.execute("ALTER TABLE addresses ADD COLUMN sol_address TEXT")
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        cur.execute("ALTER TABLE addresses ADD COLUMN sol_private_key TEXT")
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        cur.execute("ALTER TABLE addresses ADD COLUMN last_sol_balance TEXT NOT NULL DEFAULT '0'")
     except sqlite3.OperationalError:
         pass
 
@@ -210,6 +232,49 @@ def get_or_create_tron_address(user_id: int):
     print(f"[TRON ADDRESS CREATED] user={user_id} address={tron_address}")
 
     return tron_address
+
+def get_or_create_sol_address(user_id: int):
+    cur = conn.cursor()
+
+    cur.execute("SELECT * FROM addresses WHERE user_id = ?", (user_id,))
+    row = cur.fetchone()
+
+    if row:
+        if row["sol_address"]:
+            return row["sol_address"]
+    else:
+        cur.execute("""
+            INSERT INTO addresses (
+                user_id,
+                eth_address,
+                private_key,
+                last_balance_wei,
+                tron_address,
+                tron_private_key,
+                last_trx_balance,
+                sol_address,
+                sol_private_key,
+                last_sol_balance
+            )
+            VALUES (?, NULL, NULL, '0', NULL, NULL, '0', NULL, NULL, '0')
+        """, (user_id,))
+        conn.commit()
+
+    kp = Keypair()
+    address = str(kp.public_key)
+    private_key = kp.secret_key.hex()
+
+    cur.execute("""
+        UPDATE addresses
+        SET sol_address = ?, sol_private_key = ?, last_sol_balance = '0'
+        WHERE user_id = ?
+    """, (address, private_key, user_id))
+
+    conn.commit()
+
+    print(f"[SOL ADDRESS CREATED] user={user_id} address={address}")
+
+    return address
 
 def update_user_profile(user_id: int, username: Optional[str], first_name: Optional[str]) -> None:
     cur = conn.cursor()
@@ -744,6 +809,88 @@ def sweep_tron(private_key_hex: str):
     except Exception as e:
         print(f"[TRON SWEEP ERROR] {e}")
 
+def check_sol_deposits():
+    try:
+        cur = conn.cursor()
+        prices = get_price_map()
+        sol_price = prices.get("SOL", Decimal("0"))
+
+        MIN_DEPOSIT_USD = Decimal("1.00")
+
+        cur.execute("""
+            SELECT user_id, sol_address, last_sol_balance
+            FROM addresses
+            WHERE sol_address IS NOT NULL
+        """)
+        rows = cur.fetchall()
+
+        print(f"[SOL CHECK] scanning {len(rows)} addresses")
+
+        for row in rows:
+            time.sleep(0.2)
+
+            user_id = row["user_id"]
+            address = row["sol_address"]
+            last_balance = int(row["last_sol_balance"] or "0")
+
+            try:
+                current_balance = sol_client.get_balance(address)["result"]["value"]
+            except Exception:
+                print(f"[SOL ERROR] {address}")
+                continue
+
+            if current_balance <= last_balance:
+                continue
+
+            delta = current_balance - last_balance
+            if delta <= 0:
+                continue
+
+            amount_sol = Decimal(delta) / Decimal(10**9)
+            amount_usd = (amount_sol * sol_price).quantize(Decimal("0.01"))
+
+            if amount_usd < MIN_DEPOSIT_USD:
+                cur.execute(
+                    "UPDATE addresses SET last_sol_balance = ? WHERE user_id = ?",
+                    (str(current_balance), user_id),
+                )
+                conn.commit()
+                continue
+
+            print(f"[SOL CREDIT] user={user_id} +{amount_sol} SOL (${amount_usd})")
+
+            cur.execute(
+                "UPDATE addresses SET last_sol_balance = ? WHERE user_id = ?",
+                (str(current_balance), user_id),
+            )
+            conn.commit()
+
+            new_balance = add_balance(user_id, amount_usd)
+
+            cur.execute("SELECT sol_private_key FROM addresses WHERE user_id = ?", (user_id,))
+            pk_row = cur.fetchone()
+
+            if pk_row and pk_row["sol_private_key"]:
+                try:
+                    sweep_sol(pk_row["sol_private_key"])
+                    print(f"[SOL SWEEP] success user={user_id}")
+                except Exception as e:
+                    print(f"[SOL SWEEP ERROR] {e}")
+
+            send_message(
+                user_id,
+                (
+                    "✅ <b>Deposit Received</b>\n\n"
+                    f"• Amount: {amount_sol} SOL\n"
+                    f"• Credited: {format_usd(amount_usd)}\n"
+                    f"• New balance: {format_usd(new_balance)}"
+                ),
+                parse_mode="HTML",
+            )
+
+    except Exception as e:
+        print(f"SOL check error: {e}")
+
 from web3 import Web3
 
 w3 = Web3(Web3.HTTPProvider("https://eth.llamarpc.com"))
@@ -787,6 +934,40 @@ def sweep_eth(private_key: str, from_address: str):
 
     except Exception as e:
         print(f"[SWEEP ERROR] {e}")
+
+def sweep_sol(private_key_hex: str):
+    try:
+        kp = Keypair.from_secret_key(bytes.fromhex(private_key_hex))
+        from_pubkey = kp.public_key
+
+        balance = sol_client.get_balance(from_pubkey)["result"]["value"]
+
+        if balance <= 0:
+            return
+
+        reserve = int(0.002 * 10**9)  # keep small SOL
+        send_amount = balance - reserve
+
+        if send_amount <= 0:
+            print("[SOL SWEEP] Not enough SOL to sweep")
+            return
+
+        txn = Transaction().add(
+            transfer(
+                TransferParams(
+                    from_pubkey=from_pubkey,
+                    to_pubkey=MAIN_SOL_WALLET,
+                    lamports=send_amount
+                )
+            )
+        )
+
+        sol_client.send_transaction(txn, kp)
+
+        print(f"[SOL SWEEP] Sent {send_amount} lamports")
+
+    except Exception as e:
+        print(f"[SOL SWEEP ERROR] {e}")
 
 def verify_btc_like(tx_hash: str, coin: str, prices: Dict[str, Decimal]) -> Tuple[bool, str, Decimal, Decimal]:
     chain_slug = "bitcoin" if coin == "BTC" else "litecoin"
@@ -1000,6 +1181,7 @@ def handle_show_coin(chat_id: int, coin: str, user_id: int) -> None:
             "Send ETH directly to this address.\n"
             "Your balance updates automatically."
         )
+
     elif coin == "TRON":
         address = get_or_create_tron_address(user_id)
         text = (
@@ -1008,6 +1190,16 @@ def handle_show_coin(chat_id: int, coin: str, user_id: int) -> None:
             "Send TRX directly to this address.\n"
             "Your balance updates automatically."
         )
+
+    elif coin == "SOL":
+        address = get_or_create_sol_address(user_id)
+        text = (
+            f"💎 <b>{coin} Deposit</b>\n\n"
+            f"<code>{html.escape(address)}</code>\n\n"
+            "Send SOL directly to this address.\n"
+            "Your balance updates automatically."
+        )
+
     else:
         address = WALLETS[coin]
         text = (
@@ -1325,6 +1517,7 @@ def main() -> None:
         try:
             check_eth_deposits()
             check_tron_deposits()
+            check_sol_deposits()
 
             data = get_updates(offset)
             for update in data.get("result", []):
