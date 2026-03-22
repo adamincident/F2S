@@ -622,18 +622,31 @@ def get_price_map() -> Dict[str, Decimal]:
 
     joined = ",".join(ids.values())
 
-    resp = requests.get(
-        "https://api.coingecko.com/api/v3/simple/price",
-        params={"ids": joined, "vs_currencies": "usd"},
-        timeout=20,
-    )
+    try:
+        resp = requests.get(
+            "https://api.coingecko.com/api/v3/simple/price",
+            params={"ids": joined, "vs_currencies": "usd"},
+            timeout=10,
+        )
 
-    data = resp.json()
+        data = resp.json()
+
+        if not isinstance(data, dict):
+            raise Exception("Invalid price response")
+
+    except Exception as e:
+        print(f"[PRICE ERROR] {e}")
+        return {}
 
     prices: Dict[str, Decimal] = {}
 
     for coin, coin_id in ids.items():
-        usd = data.get(coin_id, {}).get("usd", 0)
+        usd = data.get(coin_id, {}).get("usd")
+
+        if usd is None or usd == 0:
+            print(f"[PRICE WARNING] Missing price for {coin}")
+            continue
+
         prices[coin] = Decimal(str(usd))
 
     return prices
@@ -713,7 +726,12 @@ def check_eth_deposits():
     try:
         cur = conn.cursor()
         prices = get_price_map()
-        eth_price = prices.get("ETH", Decimal("0"))
+
+        # 🔥 STRONGER FIX — ensure price exists
+        eth_price = prices.get("ETH")
+        if not eth_price:
+            print("[ETH ERROR] No ETH price available — skipping cycle")
+            return
 
         MIN_DEPOSIT_USD = Decimal("1.00")
 
@@ -730,18 +748,17 @@ def check_eth_deposits():
             address = eth_address.lower()
             last_balance_wei = int(row["last_balance_wei"] or "0")
 
-            resp = requests.post(
-                "https://eth-mainnet.g.alchemy.com/v2/R9SivaKDqDjIUhA-H0ZlW",
-                json={
-                    "jsonrpc": "2.0",
-                    "method": "eth_getBalance",
-                    "params": [address, "latest"],
-                    "id": 1,
-                },
-                timeout=20,
-            )
-
             try:
+                resp = requests.post(
+                    "https://eth-mainnet.g.alchemy.com/v2/R9SivaKDqDjIUhA-H0ZlW",
+                    json={
+                        "jsonrpc": "2.0",
+                        "method": "eth_getBalance",
+                        "params": [address, "latest"],
+                        "id": 1,
+                    },
+                    timeout=20,
+                )
                 data = resp.json()
             except Exception as e:
                 print(f"[ETH ERROR] {address} {e}")
@@ -770,7 +787,7 @@ def check_eth_deposits():
                 rounding=ROUND_HALF_UP
             )
 
-            # 🔥 FIXED INDENTATION
+            # 🔥 MIN DEPOSIT CHECK
             if amount_usd < MIN_DEPOSIT_USD:
                 print(f"[IGNORED SMALL DEPOSIT] user={user_id} ${amount_usd}")
 
@@ -788,6 +805,7 @@ def check_eth_deposits():
 
             print(f"[ETH CREDIT] user={user_id} +{amount_eth} ETH (${amount_usd})")
 
+            # 🔥 UPDATE BALANCE FIRST (ANTI DOUBLE CREDIT)
             cur.execute(
                 "UPDATE addresses SET last_balance_wei = ? WHERE user_id = ?",
                 (str(current_balance_wei), user_id),
@@ -796,6 +814,7 @@ def check_eth_deposits():
 
             new_balance = add_balance(user_id, amount_usd)
 
+            # 🔥 SWEEP
             cur.execute("SELECT private_key FROM addresses WHERE user_id = ?", (user_id,))
             pk_row = cur.fetchone()
 
@@ -806,6 +825,7 @@ def check_eth_deposits():
                 except Exception as e:
                     print(f"[ETH SWEEP ERROR] {e}")
 
+            # 🔥 SUCCESS MESSAGE
             send_message(
                 user_id,
                 (
