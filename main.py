@@ -1535,7 +1535,6 @@ def handle_text_message(chat_id: int, user_id: int, text: str, display_name: str
         message = text.strip()
         char_count = len(message)
 
-        # 🔥 ALLOW TELEGRAM LINKS ONLY
         if "http" in message.lower() and "t.me" not in message.lower():
             send_message(chat_id, "🚫 Only Telegram links are allowed.")
             return
@@ -1551,7 +1550,6 @@ def handle_text_message(chat_id: int, user_id: int, text: str, display_name: str
         cost = cost_for_message(message)
         balance = get_balance(user_id)
 
-        # 🔥 STEP 6 — CONVERSION BOOST
         if balance < cost:
             send_message(
                 chat_id,
