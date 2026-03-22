@@ -621,7 +621,10 @@ def get_price_map() -> Dict[str, Decimal]:
                 "ids": "ethereum,tron,solana",
                 "vs_currencies": "usd"
             },
-            timeout=5,
+            headers={
+                "User-Agent": "Mozilla/5.0"
+            },
+            timeout=10,
         )
 
         data = resp.json()
@@ -651,7 +654,7 @@ def get_price_map() -> Dict[str, Decimal]:
             print("[PRICE] using cached prices")
             return PRICE_CACHE
 
-        # 🔥 LAST RESORT FALLBACK (safe values)
+        # 🔥 LAST RESORT FALLBACK
         print("[PRICE] using fallback prices")
 
         return {
