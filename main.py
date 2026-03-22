@@ -1302,8 +1302,18 @@ def handle_start(chat_id: int, user_id: int) -> None:
 def handle_help(chat_id: int) -> None:
     send_message(chat_id, help_text(), reply_markup=main_menu_keyboard(), parse_mode="HTML")
 
-def handle_leaderboard(chat_id: int):
-    rows = get_leaderboard()
+def handle_leaderboard(chat_id: int) -> None:
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT u.user_id, u.username, u.first_name, SUM(c.amount_usd) as total
+        FROM claims c
+        JOIN users u ON u.user_id = c.claimed_by
+        GROUP BY c.claimed_by
+        ORDER BY total DESC
+        LIMIT 10
+    """)
+    rows = cur.fetchall()
 
     if not rows:
         send_message(chat_id, "No leaderboard data yet.")
@@ -1312,10 +1322,18 @@ def handle_leaderboard(chat_id: int):
     text = "🏆 <b>Top Senders</b>\n\n"
 
     for i, row in enumerate(rows, start=1):
-        name = html.escape(row["first_name"] or "User")
-        spent = Decimal(row["total_spent"])
+        user_id = row["user_id"]
+        username = row["username"]
+        first_name = row["first_name"] or "User"
+        total = Decimal(row["total"] or "0")
 
-        text += f"{i}. {name} — {format_usd(spent)}\n"
+        # 🔥 clickable username logic
+        if username:
+            name = f"@{username}"
+        else:
+            name = f"<a href='tg://user?id={user_id}'>{first_name}</a>"
+
+        text += f"{i}. {name} — {format_usd(total)}\n"
 
     text += "\n🔥 Want to be #1? Send a message."
 
