@@ -610,46 +610,36 @@ def help_text() -> str:
 # CHAIN VERIFICATION
 # =========================
 def get_price_map() -> Dict[str, Decimal]:
-    ids = {
-        "BTC": "bitcoin",
-        "ETH": "ethereum",
-        "SOL": "solana",
-        "XRP": "ripple",
-        "TRON": "tron",
-        "LTC": "litecoin",
-        "TON": "the-open-network",
-    }
-
-    joined = ",".join(ids.values())
-
     try:
         resp = requests.get(
             "https://api.coingecko.com/api/v3/simple/price",
-            params={"ids": joined, "vs_currencies": "usd"},
-            timeout=10,
+            params={
+                "ids": "ethereum,tron,solana",
+                "vs_currencies": "usd"
+            },
+            timeout=5,
         )
 
         data = resp.json()
 
-        if not isinstance(data, dict):
-            raise Exception("Invalid price response")
+        if not isinstance(data, dict) or not data:
+            raise Exception("Empty price response")
+
+        return {
+            "ETH": Decimal(str(data["ethereum"]["usd"])),
+            "TRON": Decimal(str(data["tron"]["usd"])),
+            "SOL": Decimal(str(data["solana"]["usd"])),
+        }
 
     except Exception as e:
-        print(f"[PRICE ERROR] {e}")
-        return {}
+        print(f"[PRICE ERROR] using fallback prices: {e}")
 
-    prices: Dict[str, Decimal] = {}
-
-    for coin, coin_id in ids.items():
-        usd = data.get(coin_id, {}).get("usd")
-
-        if usd is None or usd == 0:
-            print(f"[PRICE WARNING] Missing price for {coin}")
-            continue
-
-        prices[coin] = Decimal(str(usd))
-
-    return prices
+        # 🔥 FALLBACK PRICES (VERY IMPORTANT)
+        return {
+            "ETH": Decimal("3000"),
+            "TRON": Decimal("0.12"),
+            "SOL": Decimal("100"),
+        }
 
 def verify_eth(tx_hash: str, prices: Dict[str, Decimal]):
     try:
