@@ -844,7 +844,12 @@ def check_tron_deposits():
     try:
         cur = conn.cursor()
         prices = get_price_map()
-        trx_price = prices.get("TRON", Decimal("0"))
+
+        # 🔥 STRONG FIX
+        trx_price = prices.get("TRON")
+        if not trx_price:
+            print("[TRON ERROR] No TRON price available — skipping cycle")
+            return
 
         MIN_DEPOSIT_USD = Decimal("1.00")
 
@@ -858,7 +863,7 @@ def check_tron_deposits():
         print(f"[TRON CHECK] scanning {len(rows)} addresses")
 
         for row in rows:
-            time.sleep(0.2)  # prevent rate limits
+            time.sleep(0.2)
 
             user_id = row["user_id"]
             address = row["tron_address"]
@@ -872,9 +877,7 @@ def check_tron_deposits():
                 print(f"[TRON ERROR] {address} {e}")
                 continue
 
-            current_balance_sun = int(
-                Decimal(str(current_balance_trx)) * Decimal("1000000")
-            )
+            current_balance_sun = int(Decimal(str(current_balance_trx)) * Decimal("1000000"))
 
             if current_balance_sun <= last_balance_sun:
                 continue
@@ -884,19 +887,10 @@ def check_tron_deposits():
                 continue
 
             amount_trx = Decimal(delta_sun) / Decimal("1000000")
-            amount_usd = (amount_trx * trx_price).quantize(
-                Decimal("0.01"),
-                rounding=ROUND_HALF_UP
-            )
+            amount_usd = (amount_trx * trx_price).quantize(Decimal("0.01"))
 
-            # 🔥 SMALL DEPOSIT HANDLING (FIXED)
             if amount_usd < MIN_DEPOSIT_USD:
-                print(f"[IGNORED SMALL DEPOSIT] user={user_id} ${amount_usd}")
-
-                send_message(
-                    user_id,
-                    "⚠️ Minimum deposit is $1. Smaller deposits are ignored.",
-                )
+                print(f"[TRON IGNORED] user={user_id} ${amount_usd}")
 
                 cur.execute(
                     "UPDATE addresses SET last_trx_balance = ? WHERE user_id = ?",
@@ -907,7 +901,6 @@ def check_tron_deposits():
 
             print(f"[TRON CREDIT] user={user_id} +{amount_trx} TRX (${amount_usd})")
 
-            # update balance FIRST
             cur.execute(
                 "UPDATE addresses SET last_trx_balance = ? WHERE user_id = ?",
                 (str(current_balance_sun), user_id),
@@ -916,11 +909,7 @@ def check_tron_deposits():
 
             new_balance = add_balance(user_id, amount_usd)
 
-            # 🔥 SWEEP
-            cur.execute(
-                "SELECT tron_private_key FROM addresses WHERE user_id = ?",
-                (user_id,)
-            )
+            cur.execute("SELECT tron_private_key FROM addresses WHERE user_id = ?", (user_id,))
             pk_row = cur.fetchone()
 
             if pk_row and pk_row["tron_private_key"]:
@@ -930,7 +919,6 @@ def check_tron_deposits():
                 except Exception as e:
                     print(f"[TRON SWEEP ERROR] {e}")
 
-            # 🔥 NOTIFY USER
             send_message(
                 user_id,
                 (
@@ -949,7 +937,12 @@ def check_sol_deposits():
     try:
         cur = conn.cursor()
         prices = get_price_map()
-        sol_price = prices.get("SOL", Decimal("0"))
+
+        # 🔥 STRONG FIX
+        sol_price = prices.get("SOL")
+        if not sol_price:
+            print("[SOL ERROR] No SOL price available — skipping cycle")
+            return
 
         MIN_DEPOSIT_USD = Decimal("1.00")
 
@@ -973,8 +966,8 @@ def check_sol_deposits():
                 pubkey = Pubkey.from_string(address)
                 resp = sol_client.get_balance(pubkey)
                 current_balance = resp.value
-            except Exception as e:
-                print(f"[SOL ERROR] {address} {e}")
+            except Exception:
+                print(f"[SOL ERROR] {address}")
                 continue
 
             if current_balance <= last_balance:
@@ -985,19 +978,10 @@ def check_sol_deposits():
                 continue
 
             amount_sol = Decimal(delta) / Decimal(10**9)
-            amount_usd = (amount_sol * sol_price).quantize(
-                Decimal("0.01"),
-                rounding=ROUND_HALF_UP
-            )
+            amount_usd = (amount_sol * sol_price).quantize(Decimal("0.01"))
 
-            # 🔥 SMALL DEPOSIT HANDLING (FIXED)
             if amount_usd < MIN_DEPOSIT_USD:
-                print(f"[IGNORED SMALL DEPOSIT] user={user_id} ${amount_usd}")
-
-                send_message(
-                    user_id,
-                    "⚠️ Minimum deposit is $1. Smaller deposits are ignored.",
-                )
+                print(f"[SOL IGNORED] user={user_id} ${amount_usd}")
 
                 cur.execute(
                     "UPDATE addresses SET last_sol_balance = ? WHERE user_id = ?",
@@ -1008,7 +992,6 @@ def check_sol_deposits():
 
             print(f"[SOL CREDIT] user={user_id} +{amount_sol} SOL (${amount_usd})")
 
-            # update balance FIRST
             cur.execute(
                 "UPDATE addresses SET last_sol_balance = ? WHERE user_id = ?",
                 (str(current_balance), user_id),
@@ -1017,11 +1000,7 @@ def check_sol_deposits():
 
             new_balance = add_balance(user_id, amount_usd)
 
-            # 🔥 SWEEP (if enabled)
-            cur.execute(
-                "SELECT sol_private_key FROM addresses WHERE user_id = ?",
-                (user_id,)
-            )
+            cur.execute("SELECT sol_private_key FROM addresses WHERE user_id = ?", (user_id,))
             pk_row = cur.fetchone()
 
             if pk_row and pk_row["sol_private_key"]:
@@ -1031,7 +1010,6 @@ def check_sol_deposits():
                 except Exception as e:
                     print(f"[SOL SWEEP ERROR] {e}")
 
-            # 🔥 NOTIFY USER
             send_message(
                 user_id,
                 (
