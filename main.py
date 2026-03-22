@@ -259,8 +259,8 @@ def get_or_create_sol_address(user_id: int):
         conn.commit()
 
     kp = Keypair()
-    address = str(kp.public_key)
-    private_key = kp.secret_key.hex()
+    address = str(kp.pubkey())
+    private_key = kp.to_bytes().hex()
 
     cur.execute("""
         UPDATE addresses
