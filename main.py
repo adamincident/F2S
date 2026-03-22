@@ -39,7 +39,7 @@ MIN_CHARS = 3
 MAX_CHARS = 3000
 POST_COOLDOWN_SECONDS = 30
 POLL_TIMEOUT = 30
-DB_PATH = "Fund2Say.db"
+DB_PATH = "/data/Fund2Say.db"
 
 WALLETS = {
     "BTC": "bc1q96rxp2wrx4jcfnkgre32umfq4kr20pyc9vfsps",
