@@ -497,8 +497,12 @@ def post_choice_keyboard() -> Dict[str, Any]:
     return {
         "inline_keyboard": [
             [
-                {"text": "Normal", "callback_data": "post_normal"},
-                {"text": "⭐ Premium (+$25)", "callback_data": "post_premium"},
+                {"text": "Normal", "callback_data": "post_normal_public"},
+                {"text": "⭐ Premium (+$25)", "callback_data": "post_premium_public"},
+            ],
+            [
+                {"text": "Anonymous", "callback_data": "post_normal_anon"},
+                {"text": "⭐ Premium Anonymous (+$25)", "callback_data": "post_premium_anon"},
             ],
             [{"text": "Cancel", "callback_data": "cancel_post"}],
         ]
