@@ -622,23 +622,29 @@ def get_price_map() -> Dict[str, Decimal]:
 
         data = resp.json()
 
-        if not isinstance(data, dict) or not data:
-            raise Exception("Empty price response")
+        prices = {}
 
-        return {
-            "ETH": Decimal(str(data["ethereum"]["usd"])),
-            "TRON": Decimal(str(data["tron"]["usd"])),
-            "SOL": Decimal(str(data["solana"]["usd"])),
-        }
+        if "ethereum" in data:
+            prices["ETH"] = Decimal(str(data["ethereum"]["usd"]))
+
+        if "tron" in data:
+            prices["TRON"] = Decimal(str(data["tron"]["usd"]))
+
+        if "solana" in data:
+            prices["SOL"] = Decimal(str(data["solana"]["usd"]))
+
+        if not prices:
+            raise Exception("No prices returned")
+
+        return prices
 
     except Exception as e:
         print(f"[PRICE ERROR] using fallback prices: {e}")
 
-        # 🔥 FALLBACK PRICES (VERY IMPORTANT)
         return {
-            "ETH": Decimal("3000"),
-            "TRON": Decimal("0.12"),
-            "SOL": Decimal("100"),
+            "ETH": Decimal("3500"),
+            "TRON": Decimal("0.13"),
+            "SOL": Decimal("200"),
         }
 
 def verify_eth(tx_hash: str, prices: Dict[str, Decimal]):
