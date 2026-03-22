@@ -9,6 +9,7 @@ from tronpy.keys import PrivateKey
 from tronpy.providers import HTTPProvider
 from solders.keypair import Keypair
 from solana.rpc.api import Client
+from solders.pubkey import Pubkey
 
 tron = Tron(
     provider=HTTPProvider(
@@ -832,7 +833,8 @@ def check_sol_deposits():
             last_balance = int(row["last_sol_balance"] or "0")
 
             try:
-                current_balance = sol_client.get_balance(address)["result"]["value"]
+                pubkey = Pubkey.from_string(address)
+                current_balance = sol_client.get_balance(pubkey)["result"]["value"]
             except Exception:
                 print(f"[SOL ERROR] {address}")
                 continue
