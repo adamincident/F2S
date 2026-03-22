@@ -2,3 +2,4 @@ requests
 eth-account
 web3
 tronpy
+solana
