@@ -1329,11 +1329,27 @@ def handle_show_coin(chat_id: int, coin: str, user_id: int) -> None:
 
 def handle_balance(chat_id: int, user_id: int) -> None:
     bal = get_balance(user_id)
+
     send_message(
         chat_id,
-        f"💰 <b>Your Balance</b>\n\n{format_usd(bal)}",
-        reply_markup=main_menu_keyboard(),
+        (
+            "💰 <b>Your Balance</b>\n\n"
+            f"{format_usd(bal)}\n\n"
+            "━━━━━━━━━━━━━━━\n"
+            "What would you like to do?"
+        ),
         parse_mode="HTML",
+        reply_markup={
+            "inline_keyboard": [
+                [
+                    {"text": "💳 Deposit", "callback_data": "menu_deposit"},
+                    {"text": "✍️ Send Message", "callback_data": "menu_send"},
+                ],
+                [
+                    {"text": "⬅️ Back", "callback_data": "menu_home"}
+                ]
+            ]
+        }
     )
 
 def handle_send_begin(chat_id: int, user_id: int) -> None:
