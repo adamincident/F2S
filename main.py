@@ -860,7 +860,6 @@ def check_tron_deposits():
         cur = conn.cursor()
         prices = get_price_map()
 
-        # 🔥 STRONG FIX
         trx_price = prices.get("TRON")
         if not trx_price:
             print("[TRON ERROR] No TRON price available — skipping cycle")
@@ -894,6 +893,20 @@ def check_tron_deposits():
 
             current_balance_sun = int(Decimal(str(current_balance_trx)) * Decimal("1000000"))
 
+            # 🔥 DEBUG
+            print(f"[TRON DEBUG] {address} current={current_balance_sun} last={last_balance_sun}")
+
+            # 🔥 FIX: handle sweep (balance dropped)
+            if current_balance_sun < last_balance_sun:
+                print(f"[TRON RESET] {address} balance dropped (likely swept)")
+
+                cur.execute(
+                    "UPDATE addresses SET last_trx_balance = ? WHERE user_id = ?",
+                    (str(current_balance_sun), user_id),
+                )
+                conn.commit()
+                continue
+
             if current_balance_sun <= last_balance_sun:
                 continue
 
@@ -916,6 +929,7 @@ def check_tron_deposits():
 
             print(f"[TRON CREDIT] user={user_id} +{amount_trx} TRX (${amount_usd})")
 
+            # 🔥 update BEFORE credit
             cur.execute(
                 "UPDATE addresses SET last_trx_balance = ? WHERE user_id = ?",
                 (str(current_balance_sun), user_id),
@@ -924,6 +938,7 @@ def check_tron_deposits():
 
             new_balance = add_balance(user_id, amount_usd)
 
+            # 🔥 SWEEP
             cur.execute("SELECT tron_private_key FROM addresses WHERE user_id = ?", (user_id,))
             pk_row = cur.fetchone()
 
