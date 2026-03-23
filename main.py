@@ -1170,6 +1170,43 @@ def sweep_sol(private_key_hex: str):
     except Exception as e:
         print(f"[SOL SWEEP ERROR] {e}")
 
+def sweep_tron(private_key_hex: str):
+    try:
+        from tronpy.keys import PrivateKey
+
+        pk = PrivateKey(bytes.fromhex(private_key_hex))
+        owner = pk.public_key.to_base58check_address()
+
+        balance_trx = tron.get_account_balance(owner)
+
+        if balance_trx <= Decimal("0"):
+            return
+
+        reserve = Decimal("1")  # keep some TRX for fees
+        send_amount = Decimal(str(balance_trx)) - reserve
+
+        if send_amount <= Decimal("0"):
+            print(f"[TRON SWEEP] Not enough TRX to sweep from {owner}")
+            return
+
+        txn = (
+            tron.trx.transfer(
+                owner,
+                MAIN_TRON_WALLET,
+                int(send_amount * Decimal("1000000"))
+            )
+            .memo("Fund2Say sweep")
+            .build()
+            .sign(pk)
+        )
+
+        result = txn.broadcast()
+
+        print(f"[TRON SWEEP] {owner} -> {MAIN_TRON_WALLET} | result={result}")
+
+    except Exception as e:
+        print(f"[TRON SWEEP ERROR] {e}")
+
 def verify_btc_like(tx_hash: str, coin: str, prices: Dict[str, Decimal]) -> Tuple[bool, str, Decimal, Decimal]:
     chain_slug = "bitcoin" if coin == "BTC" else "litecoin"
     resp = requests.get(
