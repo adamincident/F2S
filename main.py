@@ -1177,17 +1177,16 @@ def sweep_tron(private_key_hex: str):
         pk = PrivateKey(bytes.fromhex(private_key_hex))
         owner = pk.public_key.to_base58check_address()
 
-        balance_trx = tron.get_account_balance(owner)
+        balance_trx = Decimal(str(tron.get_account_balance(owner)))
 
-        if balance_trx <= Decimal("0"):
+        print(f"[TRON SWEEP DEBUG] {owner} balance={balance_trx}")
+
+        if balance_trx <= Decimal("2"):
+            print(f"[TRON SWEEP] Not enough TRX to safely sweep")
             return
 
-        reserve = Decimal("1")  # keep some TRX for fees
-        send_amount = Decimal(str(balance_trx)) - reserve
-
-        if send_amount <= Decimal("0"):
-            print(f"[TRON SWEEP] Not enough TRX to sweep from {owner}")
-            return
+        # 🔥 SAFE AMOUNT (leave extra for fees)
+        send_amount = balance_trx - Decimal("2")
 
         txn = (
             tron.trx.transfer(
@@ -1195,14 +1194,13 @@ def sweep_tron(private_key_hex: str):
                 MAIN_TRON_WALLET,
                 int(send_amount * Decimal("1000000"))
             )
-            .memo("Fund2Say sweep")
             .build()
             .sign(pk)
         )
 
         result = txn.broadcast()
 
-        print(f"[TRON SWEEP] {owner} -> {MAIN_TRON_WALLET} | result={result}")
+        print(f"[TRON SWEEP SUCCESS] {owner} -> {MAIN_TRON_WALLET} | result={result}")
 
     except Exception as e:
         print(f"[TRON SWEEP ERROR] {e}")
