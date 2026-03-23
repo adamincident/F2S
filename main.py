@@ -629,22 +629,24 @@ def get_price_map() -> Dict[str, Decimal]:
 
         data = resp.json()
 
-        prices = {}
+        # 🔥 EXTRACT SAFELY
+        eth = data.get("ethereum", {}).get("usd")
+        tron = data.get("tron", {}).get("usd")
+        sol = data.get("solana", {}).get("usd")
 
-        if "ethereum" in data:
-            prices["ETH"] = Decimal(str(data["ethereum"]["usd"]))
+        # 🔥 REQUIRE ALL PRICES (IMPORTANT FIX)
+        if not eth or not tron or not sol:
+            raise Exception("Missing one or more prices")
 
-        if "tron" in data:
-            prices["TRON"] = Decimal(str(data["tron"]["usd"]))
+        prices = {
+            "ETH": Decimal(str(eth)),
+            "TRON": Decimal(str(tron)),
+            "SOL": Decimal(str(sol)),
+        }
 
-        if "solana" in data:
-            prices["SOL"] = Decimal(str(data["solana"]["usd"]))
-
-        if prices:
-            PRICE_CACHE = prices  # 🔥 save last good prices
-            return prices
-
-        raise Exception("No valid prices")
+        # 🔥 SAVE CACHE
+        PRICE_CACHE = prices
+        return prices
 
     except Exception as e:
         print(f"[PRICE ERROR] {e}")
@@ -654,13 +656,13 @@ def get_price_map() -> Dict[str, Decimal]:
             print("[PRICE] using cached prices")
             return PRICE_CACHE
 
-        # 🔥 LAST RESORT FALLBACK
+        # 🔥 LAST RESORT FALLBACK (SAFE VALUES)
         print("[PRICE] using fallback prices")
 
         return {
-            "ETH": Decimal("1900"),
-            "TRON": Decimal("0.28"),
-            "SOL": Decimal("75"),
+            "ETH": Decimal("2000"),
+            "TRON": Decimal("0.25"),
+            "SOL": Decimal("90"),
         }
 
 def verify_eth(tx_hash: str, prices: Dict[str, Decimal]):
