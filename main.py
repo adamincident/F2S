@@ -742,7 +742,6 @@ def check_eth_deposits():
         cur = conn.cursor()
         prices = get_price_map()
 
-        # 🔥 STRONGER FIX — ensure price exists
         eth_price = prices.get("ETH")
         if not eth_price:
             print("[ETH ERROR] No ETH price available — skipping cycle")
@@ -789,6 +788,20 @@ def check_eth_deposits():
 
             current_balance_wei = int(balance_hex, 16)
 
+            # 🔥 DEBUG
+            print(f"[ETH DEBUG] {address} current={current_balance_wei} last={last_balance_wei}")
+
+            # 🔥 FIX: handle sweep (balance dropped)
+            if current_balance_wei < last_balance_wei:
+                print(f"[ETH RESET] {address} balance dropped (likely swept)")
+
+                cur.execute(
+                    "UPDATE addresses SET last_balance_wei = ? WHERE user_id = ?",
+                    (str(current_balance_wei), user_id),
+                )
+                conn.commit()
+                continue
+
             if current_balance_wei <= last_balance_wei:
                 continue
 
@@ -802,7 +815,6 @@ def check_eth_deposits():
                 rounding=ROUND_HALF_UP
             )
 
-            # 🔥 MIN DEPOSIT CHECK
             if amount_usd < MIN_DEPOSIT_USD:
                 print(f"[IGNORED SMALL DEPOSIT] user={user_id} ${amount_usd}")
 
@@ -820,7 +832,7 @@ def check_eth_deposits():
 
             print(f"[ETH CREDIT] user={user_id} +{amount_eth} ETH (${amount_usd})")
 
-            # 🔥 UPDATE BALANCE FIRST (ANTI DOUBLE CREDIT)
+            # 🔥 update BEFORE credit
             cur.execute(
                 "UPDATE addresses SET last_balance_wei = ? WHERE user_id = ?",
                 (str(current_balance_wei), user_id),
@@ -840,7 +852,6 @@ def check_eth_deposits():
                 except Exception as e:
                     print(f"[ETH SWEEP ERROR] {e}")
 
-            # 🔥 SUCCESS MESSAGE
             send_message(
                 user_id,
                 (
