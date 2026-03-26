@@ -1372,14 +1372,14 @@ def build_public_post(user_id: int, display_name: str, cost: Decimal, message: s
     safe_name = html.escape(display_name)
     safe_message = html.escape(message)
     return (
-        f'<a href="tg://user?id={user_id}">{safe_name}</a> sent {html.escape(format_usd(cost))} to say:\n\n'
-        f'“{safe_message}”'
-    )
+    f'<a href="tg://user?id={user_id}">{safe_name}</a> sent {html.escape(format_usd(cost))} to say:\n\n'
+    f'“{safe_message}”'
+)
 
 
 def build_anonymous_post(cost: Decimal, message: str) -> str:
     safe_message = html.escape(message)
-    return f"Anonymous sent {html.escape(format_usd(cost))} to say:\n\n“{safe_message}”"
+    return f"<b>Anonymous</b> sent <b>{html.escape(format_usd(cost))}</b> to say:\n\n“{safe_message}”"
 
 
 def can_post_now(user_id: int) -> Tuple[bool, int]:
