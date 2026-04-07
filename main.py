@@ -1368,13 +1368,28 @@ def verify_claim(coin: str, tx_hash: str) -> Tuple[bool, str, Decimal, Decimal]:
 # =========================
 # MESSAGE POSTING
 # =========================
-def build_public_post(user_id: int, display_name: str, cost: Decimal, message: str) -> str:
-    safe_name = html.escape(display_name)
+def build_public_post(user_id: int, username: str, first_name: str, last_name: str, cost: Decimal, message: str) -> str:
+    import html
+
+    # 🔥 build clean display name
+    name = f"{first_name or ''} {last_name or ''}".strip()
+
+    if not name:
+        name = "User"
+
+    safe_name = html.escape(name)
     safe_message = html.escape(message)
+
+    # 🔥 if username exists → use @username (cleaner)
+    if username:
+        display = f"@{username}"
+    else:
+        display = f'<a href="tg://user?id={user_id}">{safe_name}</a>'
+
     return (
-    f'<a href="tg://user?id={user_id}">{safe_name}</a> sent {html.escape(format_usd(cost))} to say:\n\n'
-    f'“{safe_message}”'
-)
+        f'{display} sent <b>{format_usd(cost)}</b> to say:\n\n'
+        f'“{safe_message}”'
+    )
 
 
 def build_anonymous_post(cost: Decimal, message: str) -> str:
@@ -1708,16 +1723,17 @@ def handle_callback(callback_query: Dict[str, Any]) -> None:
     data = callback_query["data"]
     msg = callback_query["message"]
     chat_id = msg["chat"]["id"]
+
     from_user = callback_query["from"]
     user_id = from_user["id"]
     username = from_user.get("username")
     first_name = from_user.get("first_name") or "User"
+    last_name = from_user.get("last_name")  # 🔥 FIX ADDED
     display_name = first_name.strip() or "User"
 
     update_user_profile(user_id, username, first_name)
     answer_callback(callback_id)
 
-    # 🔥 COMING SOON
     if data.startswith("soon_"):
         coin = data.split("_")[1]
         send_message(
@@ -1796,7 +1812,14 @@ def handle_callback(callback_query: Dict[str, Any]) -> None:
         if is_anon:
             preview = prefix + build_anonymous_post(cost, pending_message)
         else:
-            preview = prefix + build_public_post(user_id, display_name, cost, pending_message)
+            preview = prefix + build_public_post(
+                user_id,
+                username,
+                first_name,
+                last_name,
+                cost,
+                pending_message
+            )
 
         send_message(
             chat_id,
@@ -1860,7 +1883,14 @@ def handle_callback(callback_query: Dict[str, Any]) -> None:
         if is_anon:
             post = label + build_anonymous_post(cost, pending_message)
         else:
-            post = label + build_public_post(user_id, display_name, cost, pending_message)
+            post = label + build_public_post(
+                user_id,
+                username,
+                first_name,
+                last_name,
+                cost,
+                pending_message
+            )
 
         resp = tg_request("sendMessage", {
             "chat_id": CHANNEL_ID,
