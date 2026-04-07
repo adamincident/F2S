@@ -562,6 +562,16 @@ def confirm_keyboard(mode: str) -> Dict[str, Any]:
     }
 
 
+def admin_log(text: str):
+    try:
+        tg_request("sendMessage", {
+            "chat_id": ADMIN_ID,
+            "text": text,
+            "parse_mode": "HTML"
+        })
+    except Exception as e:
+        print(f"[ADMIN LOG ERROR] {e}")
+
 def format_usd(amount: Decimal) -> str:
     return f"${amount.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)}"
 
@@ -832,6 +842,14 @@ def check_eth_deposits():
 
             print(f"[ETH CREDIT] user={user_id} +{amount_eth} ETH (${amount_usd})")
 
+            # 🔥 ADMIN LOG — DEPOSIT
+            admin_log(
+                f"💰 <b>ETH Deposit</b>\n"
+                f"User: <code>{user_id}</code>\n"
+                f"Amount: {amount_eth} ETH\n"
+                f"Value: {format_usd(amount_usd)}"
+            )
+
             # 🔥 update BEFORE credit
             cur.execute(
                 "UPDATE addresses SET last_balance_wei = ? WHERE user_id = ?",
@@ -849,8 +867,22 @@ def check_eth_deposits():
                 try:
                     sweep_eth(pk_row["private_key"], address)
                     print(f"[ETH SWEEP] success user={user_id}")
+
+                    # 🔥 ADMIN LOG — SWEEP
+                    admin_log(
+                        f"🚀 <b>ETH Sweep</b>\n"
+                        f"User: <code>{user_id}</code>\n"
+                        f"Amount: {amount_eth} ETH"
+                    )
+
                 except Exception as e:
                     print(f"[ETH SWEEP ERROR] {e}")
+
+                    admin_log(
+                        f"❌ <b>ETH Sweep Failed</b>\n"
+                        f"User: <code>{user_id}</code>\n"
+                        f"Error: {str(e)}"
+                    )
 
             send_message(
                 user_id,
@@ -907,7 +939,7 @@ def check_tron_deposits():
             # 🔥 DEBUG
             print(f"[TRON DEBUG] {address} current={current_balance_sun} last={last_balance_sun}")
 
-            # 🔥 FIX: handle sweep (balance dropped)
+            # 🔥 FIX: handle sweep
             if current_balance_sun < last_balance_sun:
                 print(f"[TRON RESET] {address} balance dropped (likely swept)")
 
@@ -940,6 +972,14 @@ def check_tron_deposits():
 
             print(f"[TRON CREDIT] user={user_id} +{amount_trx} TRX (${amount_usd})")
 
+            # 🔥 ADMIN LOG — DEPOSIT
+            admin_log(
+                f"💰 <b>TRON Deposit</b>\n"
+                f"User: <code>{user_id}</code>\n"
+                f"Amount: {amount_trx} TRX\n"
+                f"Value: {format_usd(amount_usd)}"
+            )
+
             # 🔥 update BEFORE credit
             cur.execute(
                 "UPDATE addresses SET last_trx_balance = ? WHERE user_id = ?",
@@ -957,8 +997,22 @@ def check_tron_deposits():
                 try:
                     sweep_tron(pk_row["tron_private_key"])
                     print(f"[TRON SWEEP] success user={user_id}")
+
+                    # 🔥 ADMIN LOG — SWEEP
+                    admin_log(
+                        f"🚀 <b>TRON Sweep</b>\n"
+                        f"User: <code>{user_id}</code>\n"
+                        f"Amount: {amount_trx} TRX"
+                    )
+
                 except Exception as e:
                     print(f"[TRON SWEEP ERROR] {e}")
+
+                    admin_log(
+                        f"❌ <b>TRON Sweep Failed</b>\n"
+                        f"User: <code>{user_id}</code>\n"
+                        f"Error: {str(e)}"
+                    )
 
             send_message(
                 user_id,
@@ -1015,7 +1069,7 @@ def check_sol_deposits():
                 # 🔥 DEBUG
                 print(f"[SOL DEBUG] {address} current={current_balance} last={last_balance}")
 
-                # 🔥 FIX: handle sweep (balance dropped)
+                # 🔥 FIX: handle sweep
                 if current_balance < last_balance:
                     print(f"[SOL RESET] {address} balance dropped (likely swept)")
 
@@ -1052,7 +1106,15 @@ def check_sol_deposits():
 
             print(f"[SOL CREDIT] user={user_id} +{amount_sol} SOL (${amount_usd})")
 
-            # update BEFORE credit (prevents double credit)
+            # 🔥 ADMIN LOG — DEPOSIT
+            admin_log(
+                f"💰 <b>SOL Deposit</b>\n"
+                f"User: <code>{user_id}</code>\n"
+                f"Amount: {amount_sol} SOL\n"
+                f"Value: {format_usd(amount_usd)}"
+            )
+
+            # update BEFORE credit
             cur.execute(
                 "UPDATE addresses SET last_sol_balance = ? WHERE user_id = ?",
                 (str(current_balance), user_id),
@@ -1069,8 +1131,22 @@ def check_sol_deposits():
                 try:
                     sweep_sol(pk_row["sol_private_key"])
                     print(f"[SOL SWEEP] success user={user_id}")
+
+                    # 🔥 ADMIN LOG — SWEEP
+                    admin_log(
+                        f"🚀 <b>SOL Sweep</b>\n"
+                        f"User: <code>{user_id}</code>\n"
+                        f"Amount: {amount_sol} SOL"
+                    )
+
                 except Exception as e:
                     print(f"[SOL SWEEP ERROR] {e}")
+
+                    admin_log(
+                        f"❌ <b>SOL Sweep Failed</b>\n"
+                        f"User: <code>{user_id}</code>\n"
+                        f"Error: {str(e)}"
+                    )
 
             send_message(
                 user_id,
