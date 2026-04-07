@@ -1368,33 +1368,25 @@ def verify_claim(coin: str, tx_hash: str) -> Tuple[bool, str, Decimal, Decimal]:
 # =========================
 # MESSAGE POSTING
 # =========================
-def build_public_post(user_id: int, username: str, first_name: str, last_name: str, cost: Decimal, message: str) -> str:
-    import html
-
-    # 🔥 build clean display name
-    name = f"{first_name or ''} {last_name or ''}".strip()
-
-    if not name:
-        name = "User"
-
-    safe_name = html.escape(name)
+def build_public_post(user_id: int, display_name: str, cost: Decimal, message: str) -> str:
+    safe_name = html.escape(display_name)
     safe_message = html.escape(message)
 
-    # 🔥 if username exists → use @username (cleaner)
-    if username:
-        display = f"@{username}"
-    else:
-        display = f'<a href="tg://user?id={user_id}">{safe_name}</a>'
-
     return (
-        f'{display} sent <b>{format_usd(cost)}</b> to say:\n\n'
-        f'“{safe_message}”'
+        f'💬 <a href="tg://user?id={user_id}"><b>{safe_name}</b></a>\n\n'
+        f'{safe_message}\n\n'
+        f'💰 <b>{format_usd(cost)}</b>'
     )
 
 
 def build_anonymous_post(cost: Decimal, message: str) -> str:
     safe_message = html.escape(message)
-    return f"<b>Anonymous</b> sent <b>{html.escape(format_usd(cost))}</b> to say:\n\n“{safe_message}”"
+
+    return (
+        f'💬 <b>Anonymous</b>\n\n'
+        f'{safe_message}\n\n'
+        f'💰 <b>{format_usd(cost)}</b>'
+    )
 
 
 def can_post_now(user_id: int) -> Tuple[bool, int]:
