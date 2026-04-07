@@ -1720,8 +1720,13 @@ def handle_callback(callback_query: Dict[str, Any]) -> None:
     user_id = from_user["id"]
     username = from_user.get("username")
     first_name = from_user.get("first_name") or "User"
-    last_name = from_user.get("last_name")  # 🔥 FIX ADDED
-    display_name = first_name.strip() or "User"
+    last_name = from_user.get("last_name")
+
+    # 🔥 CLEAN DISPLAY NAME FIX
+    if username:
+        display_name = f"@{username}"
+    else:
+        display_name = (first_name + (" " + last_name if last_name else "")).strip()
 
     update_user_profile(user_id, username, first_name)
     answer_callback(callback_id)
@@ -1799,19 +1804,14 @@ def handle_callback(callback_query: Dict[str, Any]) -> None:
             pending_cost=str(cost)
         )
 
-        prefix = "⭐ <b>PREMIUM MESSAGE</b>\n\n" if is_premium else ""
-
+        # 🔥 BUILD PREVIEW (MATCHES FINAL EXACTLY)
         if is_anon:
-            preview = prefix + build_anonymous_post(cost, pending_message)
+            preview = build_anonymous_post(cost, pending_message)
         else:
-            preview = prefix + build_public_post(
-                user_id,
-                username,
-                first_name,
-                last_name,
-                cost,
-                pending_message
-            )
+            preview = build_public_post(user_id, display_name, cost, pending_message)
+
+        if is_premium:
+            preview = "⭐ <b>PREMIUM MESSAGE</b>\n\n" + preview
 
         send_message(
             chat_id,
@@ -1858,7 +1858,6 @@ def handle_callback(callback_query: Dict[str, Any]) -> None:
             set_state(user_id, None, None, None)
             return
 
-        # 🔥 TRACK TOTAL SPENT
         cur = conn.cursor()
         cur.execute("""
             UPDATE users
@@ -1870,19 +1869,13 @@ def handle_callback(callback_query: Dict[str, Any]) -> None:
         is_premium = "premium" in state
         is_anon = "anon" in state
 
-        label = "⭐ <b>PREMIUM MESSAGE</b>\n\n" if is_premium else ""
-
         if is_anon:
-            post = label + build_anonymous_post(cost, pending_message)
+            post = build_anonymous_post(cost, pending_message)
         else:
-            post = label + build_public_post(
-                user_id,
-                username,
-                first_name,
-                last_name,
-                cost,
-                pending_message
-            )
+            post = build_public_post(user_id, display_name, cost, pending_message)
+
+        if is_premium:
+            post = "⭐ <b>PREMIUM MESSAGE</b>\n\n" + post
 
         resp = tg_request("sendMessage", {
             "chat_id": CHANNEL_ID,
